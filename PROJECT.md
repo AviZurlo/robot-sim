@@ -2,9 +2,9 @@
 
 Run open source robot foundation models in simulation. Train policies, watch them improve with data.
 
-## Status: Results Dashboard Live
+## Status: Live Dashboard
 
-**Current phase:** Visualization pipeline built. Training loss curves, eval metrics, and baseline comparisons auto-generated as PNG plots.
+**Current phase:** Real-time Streamlit dashboard for monitoring training experiments. Accessible over the network via Tailscale at `http://<tailscale-ip>:8501`.
 
 ## Architecture
 
@@ -28,6 +28,7 @@ Run open source robot foundation models in simulation. Train policies, watch the
 | 2026-02-24 | LeRobot v0.4.4 + MuJoCo 3.5 + gym-aloha installed. ACT policy running in sim (100% success on cube transfer). |
 | 2026-02-24 | Training pipeline: train.py + evaluate.py. ACT trains from scratch on `lerobot/aloha_sim_transfer_cube_human` (50 demos, 20k frames). Loss drops from ~100 to ~0.20 over 5000 steps on MPS. |
 | 2026-02-24 | Results dashboard: visualize.py + run_experiment.py. 500-step training run: loss 101→2.7, 0% success (vs 80% pretrained baseline). Plots in `outputs/plots/`. |
+| 2026-02-24 | Live Streamlit dashboard: scripts/dashboard.py. Auto-refreshing loss curves, eval results + videos, experiment history, baseline comparison, status page. Accessible via Tailscale on 0.0.0.0:8501. |
 
 ## Training Details
 
@@ -56,6 +57,7 @@ Run open source robot foundation models in simulation. Train policies, watch the
 - [x] Train a custom ACT policy from scratch
 - [x] Evaluate trained checkpoints vs pretrained baseline
 - [x] Build results visualization dashboard
+- [x] Live Streamlit training dashboard (network-accessible via Tailscale)
 - [ ] Train for more steps (50k-100k) to match pretrained performance
 - [ ] Try different policy architectures (Diffusion Policy, VQ-BeT)
 - [ ] Experiment with domain randomization
