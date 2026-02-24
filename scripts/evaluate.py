@@ -1,19 +1,19 @@
 #!/usr/bin/env python
-"""Evaluate a trained ACT policy checkpoint in the ALOHA sim environment.
+"""Evaluate a trained policy checkpoint in simulation.
 
-Loads a locally-trained checkpoint (or pretrained HuggingFace model) and runs
-it in the gym-aloha MuJoCo environment, saving video + metrics.
+Supports two tasks:
+  - transfer_cube: ACT policy in ALOHA bimanual cube transfer (MuJoCo)
+  - pusht: Diffusion Policy in PushT 2D pushing task (PyGame)
 
 Usage:
-    # Evaluate a trained checkpoint
+    # Evaluate PushT trained checkpoint
+    python scripts/evaluate.py --checkpoint outputs/train/diffusion_pusht/last --task pusht
+
+    # Evaluate ALOHA trained checkpoint
     python scripts/evaluate.py --checkpoint outputs/train/act_transfer_cube/last
 
-    # Evaluate pretrained baseline for comparison
+    # Evaluate pretrained baseline
     python scripts/evaluate.py --checkpoint lerobot/act_aloha_sim_transfer_cube_human
-
-    # Customize evaluation
-    python scripts/evaluate.py --checkpoint outputs/train/act_transfer_cube/last \
-        --n-episodes 10 --device mps
 """
 
 import argparse
@@ -29,11 +29,9 @@ import torch
 from tqdm import trange
 
 from lerobot.datasets.lerobot_dataset import LeRobotDatasetMetadata
-from lerobot.envs.configs import AlohaEnv
 from lerobot.envs.factory import make_env, make_env_pre_post_processors
 from lerobot.envs.utils import add_envs_task, preprocess_observation
 from lerobot.policies.factory import make_policy, make_pre_post_processors
-from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.configs.policies import PreTrainedConfig
 from lerobot.processor import PolicyAction, PolicyProcessorPipeline
 from lerobot.utils.constants import ACTION
@@ -45,15 +43,34 @@ KNOWN_DATASETS = {
     "lerobot/act_aloha_sim_insertion_human": "lerobot/aloha_sim_insertion_human",
 }
 
+# Task -> environment configuration
+TASK_ENV_MAP = {
+    "transfer_cube": {
+        "env_type": "aloha",
+        "gym_task": "AlohaTransferCube-v0",
+        "fps": 50,
+        "episode_length": 400,
+        "obs_type": "pixels_agent_pos",
+    },
+    "pusht": {
+        "env_type": "pusht",
+        "gym_task": "PushT-v0",
+        "fps": 10,
+        "episode_length": 300,
+        "obs_type": "environment_state_agent_pos",
+    },
+}
+
 
 def run_episode(
     env: gym.vector.VectorEnv,
-    policy: PreTrainedPolicy,
+    policy,
     env_preprocessor: PolicyProcessorPipeline[dict[str, Any], dict[str, Any]],
     env_postprocessor: PolicyProcessorPipeline[dict[str, Any], dict[str, Any]],
     preprocessor: PolicyProcessorPipeline[dict[str, Any], dict[str, Any]],
     postprocessor: PolicyProcessorPipeline[PolicyAction, PolicyAction],
     seed: int = 42,
+    is_pusht: bool = False,
 ) -> tuple[list[np.ndarray], dict]:
     """Run a single episode and collect frames + metrics."""
     policy.reset()
@@ -72,6 +89,12 @@ def run_episode(
     for step in trange(max_steps, desc="  Steps", leave=False):
         observation = preprocess_observation(observation)
         observation = add_envs_task(env, observation)
+
+        # For pusht: override environment_state with agent state (2D)
+        # to match training where env_state was a copy of state
+        if is_pusht and "observation.state" in observation:
+            observation["observation.environment_state"] = observation["observation.state"].clone()
+
         observation = env_preprocessor(observation)
         observation = preprocessor(observation)
 
@@ -114,14 +137,15 @@ def is_local_checkpoint(path: str) -> bool:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Evaluate a trained policy in ALOHA sim")
+    parser = argparse.ArgumentParser(description="Evaluate a trained policy in simulation")
     parser.add_argument(
         "--checkpoint", type=str, required=True,
         help="Path to local checkpoint dir or HuggingFace model ID",
     )
     parser.add_argument(
-        "--task", type=str, default="AlohaTransferCube-v0",
-        help="Gymnasium environment task ID",
+        "--task", type=str, default="transfer_cube",
+        choices=list(TASK_ENV_MAP.keys()),
+        help="Task: 'transfer_cube' or 'pusht'",
     )
     parser.add_argument("--n-episodes", type=int, default=10, help="Number of episodes to evaluate")
     parser.add_argument("--device", type=str, default="cpu", help="Device: cpu, cuda, or mps")
@@ -132,37 +156,52 @@ def main():
     parser.add_argument("--seed", type=int, default=1000, help="Starting random seed")
     args = parser.parse_args()
 
+    is_local = is_local_checkpoint(args.checkpoint)
+    is_pusht = args.task == "pusht"
+    task_env = TASK_ENV_MAP[args.task]
+
     # Determine output directory
     if args.output_dir:
         output_dir = Path(args.output_dir)
     else:
-        checkpoint_name = Path(args.checkpoint).name if is_local_checkpoint(args.checkpoint) \
+        checkpoint_name = Path(args.checkpoint).name if is_local \
             else args.checkpoint.replace("/", "_")
         output_dir = Path("outputs/eval") / checkpoint_name
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    is_local = is_local_checkpoint(args.checkpoint)
     print(f"Evaluating {'local checkpoint' if is_local else 'pretrained model'}")
     print(f"  Checkpoint: {args.checkpoint}")
-    print(f"  Task:       {args.task}")
+    print(f"  Task:       {args.task} ({task_env['gym_task']})")
     print(f"  Device:     {args.device}")
     print(f"  Episodes:   {args.n_episodes}")
     print(f"  Output:     {output_dir}")
     print()
 
     # 1. Configure environment
-    env_cfg = AlohaEnv(
-        task=args.task,
-        fps=50,
-        episode_length=400,
-        obs_type="pixels_agent_pos",
-        render_mode="rgb_array",
-    )
+    if is_pusht:
+        from lerobot.envs.configs import PushtEnv
+        env_cfg = PushtEnv(
+            task=task_env["gym_task"],
+            fps=task_env["fps"],
+            episode_length=task_env["episode_length"],
+            obs_type=task_env["obs_type"],
+            render_mode="rgb_array",
+        )
+    else:
+        from lerobot.envs.configs import AlohaEnv
+        env_cfg = AlohaEnv(
+            task=task_env["gym_task"],
+            fps=task_env["fps"],
+            episode_length=task_env["episode_length"],
+            obs_type=task_env["obs_type"],
+            render_mode="rgb_array",
+        )
 
     # 2. Create vectorized environment
     print("Creating environment...")
     envs = make_env(cfg=env_cfg, n_envs=1, use_async_envs=False)
-    vec_env = envs["aloha"][0]
+    env_key = "pusht" if is_pusht else "aloha"
+    vec_env = envs[env_key][0]
 
     # 3. Load policy
     print(f"Loading policy from {args.checkpoint}...")
@@ -170,7 +209,6 @@ def main():
     policy_cfg.pretrained_path = args.checkpoint
     policy_cfg.device = args.device
 
-    # Load dataset metadata for normalization stats (if known pretrained model)
     dataset_id = KNOWN_DATASETS.get(args.checkpoint)
     ds_meta = None
     if dataset_id:
@@ -216,6 +254,7 @@ def main():
             preprocessor=preprocessor,
             postprocessor=postprocessor,
             seed=seed,
+            is_pusht=is_pusht,
         )
         elapsed = time.time() - start
         metrics["elapsed_s"] = round(elapsed, 1)
@@ -231,7 +270,7 @@ def main():
             video_path = output_dir / f"episode_{ep:03d}.mp4"
             thread = threading.Thread(
                 target=write_video,
-                args=(str(video_path), stacked, env_cfg.fps),
+                args=(str(video_path), stacked, task_env["fps"]),
             )
             thread.start()
             video_threads.append((thread, video_path))

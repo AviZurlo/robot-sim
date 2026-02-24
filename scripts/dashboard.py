@@ -1,6 +1,10 @@
 #!/usr/bin/env python
 """Live Streamlit dashboard for monitoring robot training experiments.
 
+Supports multiple tasks:
+  - ACT policy on ALOHA transfer cube (outputs/train/act_transfer_cube)
+  - Diffusion Policy on PushT (outputs/train/diffusion_pusht)
+
 Launch with:
     streamlit run scripts/dashboard.py --server.address 0.0.0.0 --server.port 8501
 
@@ -20,10 +24,15 @@ import streamlit as st
 # Paths
 # ---------------------------------------------------------------------------
 ROOT = Path(__file__).resolve().parent.parent
-TRAIN_DIR = ROOT / "outputs" / "train" / "act_transfer_cube"
+TRAIN_ROOT = ROOT / "outputs" / "train"
 EVAL_DIR = ROOT / "outputs" / "eval"
 PLOTS_DIR = ROOT / "outputs" / "plots"
-LOSS_LOG = TRAIN_DIR / "loss_history.json"
+
+# Known training directories (task_key -> dir name)
+TRAIN_TASKS = {
+    "ACT — Transfer Cube": "act_transfer_cube",
+    "Diffusion — PushT": "diffusion_pusht",
+}
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -44,6 +53,16 @@ def load_json(path: Path) -> dict | list | None:
         return None
     with open(path) as f:
         return json.load(f)
+
+
+def find_train_dirs() -> dict[str, Path]:
+    """Return available training directories."""
+    found = {}
+    for label, dirname in TRAIN_TASKS.items():
+        d = TRAIN_ROOT / dirname
+        if d.exists() and (d / "loss_history.json").exists():
+            found[label] = d
+    return found
 
 
 def find_eval_dirs() -> list[Path]:
@@ -73,11 +92,11 @@ def is_training_running() -> bool:
         return False
 
 
-def log_recently_updated(seconds: int = 30) -> bool:
-    """Check if the loss log was updated within the last N seconds."""
-    if not LOSS_LOG.exists():
+def log_recently_updated(path: Path, seconds: int = 30) -> bool:
+    """Check if a file was updated within the last N seconds."""
+    if not path.exists():
         return False
-    mtime = LOSS_LOG.stat().st_mtime
+    mtime = path.stat().st_mtime
     return (time.time() - mtime) < seconds
 
 
@@ -92,7 +111,16 @@ def format_timestamp(path: Path) -> str:
 # Sidebar
 # ---------------------------------------------------------------------------
 st.sidebar.title("Robot Training")
-st.sidebar.caption("ACT Policy — ALOHA Sim")
+
+# Task selector
+train_dirs = find_train_dirs()
+all_task_labels = list(TRAIN_TASKS.keys())
+available_labels = list(train_dirs.keys())
+
+if available_labels:
+    st.sidebar.caption(f"{len(available_labels)} task(s) with data")
+else:
+    st.sidebar.caption("No training data yet")
 
 page = st.sidebar.radio(
     "Navigate",
@@ -109,10 +137,8 @@ if refresh > 0:
 # Auto-refresh
 # ---------------------------------------------------------------------------
 if refresh > 0:
-    time.sleep(0.1)  # small delay to let page render
+    time.sleep(0.1)
     st.empty()
-    # Use st.fragment / auto_refresh via query param trick
-    # Streamlit's st_autorefresh is in streamlit-autorefresh; we use native rerun
     if "last_refresh" not in st.session_state:
         st.session_state.last_refresh = time.time()
 
@@ -128,50 +154,62 @@ if refresh > 0:
 if page == "Live Training":
     st.header("Live Training Loss")
 
-    loss_history = load_json(LOSS_LOG)
-
-    if loss_history is None or len(loss_history) == 0:
+    if not train_dirs:
         st.info(
             "No training data yet. Start training with:\n\n"
-            "```bash\npython scripts/train.py --steps 5000 --device mps\n```"
+            "```bash\n"
+            "# Fast PushT training (state-only, minutes on CPU)\n"
+            "python scripts/train.py --task pusht --steps 1000\n\n"
+            "# ALOHA transfer cube (vision, slower)\n"
+            "python scripts/train.py --task transfer_cube --steps 5000 --device mps\n"
+            "```"
         )
     else:
-        # Status indicator
-        if is_training_running() or log_recently_updated():
-            st.success("Training is running — loss curve updating live")
+        # Let user pick which task to view
+        selected_task = st.selectbox("Task", list(train_dirs.keys()))
+        train_dir = train_dirs[selected_task]
+        loss_log = train_dir / "loss_history.json"
+
+        loss_history = load_json(loss_log)
+
+        if loss_history is None or len(loss_history) == 0:
+            st.info(f"No loss data in {train_dir}")
         else:
-            st.caption(f"Training data from {format_timestamp(LOSS_LOG)} (not currently running)")
+            # Status indicator
+            if is_training_running() or log_recently_updated(loss_log):
+                st.success("Training is running — loss curve updating live")
+            else:
+                st.caption(f"Training data from {format_timestamp(loss_log)} (not currently running)")
 
-        # Summary metrics
-        steps = [h["step"] for h in loss_history]
-        losses = [h["loss"] for h in loss_history]
+            # Summary metrics
+            steps = [h["step"] for h in loss_history]
+            losses = [h["loss"] for h in loss_history]
 
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Current Step", f"{steps[-1]:,}")
-        col2.metric("Latest Loss", f"{losses[-1]:.4f}")
-        col3.metric("Starting Loss", f"{losses[0]:.2f}")
-        col4.metric("Loss Reduction", f"{((losses[0] - losses[-1]) / losses[0] * 100):.1f}%")
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Current Step", f"{steps[-1]:,}")
+            col2.metric("Latest Loss", f"{losses[-1]:.4f}")
+            col3.metric("Starting Loss", f"{losses[0]:.2f}")
+            col4.metric("Loss Reduction", f"{((losses[0] - losses[-1]) / losses[0] * 100):.1f}%")
 
-        # Loss chart using Streamlit native charts
-        import pandas as pd
+            # Loss chart
+            import pandas as pd
 
-        df = pd.DataFrame(loss_history)
-        df = df.set_index("step")
+            df = pd.DataFrame(loss_history)
+            df = df.set_index("step")
 
-        # Rename columns for display
-        rename = {"loss": "Total Loss"}
-        for col in df.columns:
-            if col != "loss":
-                rename[col] = col.replace("_", " ").title()
-        df = df.rename(columns=rename)
+            rename = {"loss": "Total Loss"}
+            for col in df.columns:
+                if col != "loss":
+                    rename[col] = col.replace("_", " ").title()
+            df = df.rename(columns=rename)
 
-        st.line_chart(df, use_container_width=True)
+            st.line_chart(df, use_container_width=True)
 
-        # Show static plot if it exists
-        plot_path = PLOTS_DIR / "training_loss.png"
-        if plot_path.exists():
-            with st.expander("Static training loss plot"):
-                st.image(str(plot_path), use_container_width=True)
+            # Show static plot if it exists
+            plot_path = PLOTS_DIR / "training_loss.png"
+            if plot_path.exists():
+                with st.expander("Static training loss plot"):
+                    st.image(str(plot_path), use_container_width=True)
 
 
 # ===================================================================
@@ -185,10 +223,14 @@ elif page == "Evaluation Results":
     if not eval_dirs:
         st.info(
             "No evaluation results yet. Run evaluation with:\n\n"
-            "```bash\npython scripts/evaluate.py --checkpoint outputs/train/act_transfer_cube/last --device mps\n```"
+            "```bash\n"
+            "# PushT\n"
+            "python scripts/evaluate.py --checkpoint outputs/train/diffusion_pusht/last --task pusht\n\n"
+            "# Transfer cube\n"
+            "python scripts/evaluate.py --checkpoint outputs/train/act_transfer_cube/last\n"
+            "```"
         )
     else:
-        # Pick which eval to view
         dir_names = [d.name for d in eval_dirs]
         selected = st.selectbox("Select evaluation run", dir_names)
         eval_path = EVAL_DIR / selected
@@ -205,7 +247,8 @@ elif page == "Evaluation Results":
             col1.metric("Success Rate", f"{summary['success_rate'] * 100:.0f}%")
             col2.metric("Avg Reward", f"{summary['avg_reward']:.2f}")
             col3.metric("Episodes", summary["n_episodes"])
-            col4.metric("Checkpoint", summary.get("checkpoint", "unknown").split("/")[-1])
+            task_label = summary.get("task", "unknown")
+            col4.metric("Task", task_label)
 
             # Episode table
             import pandas as pd
@@ -217,7 +260,7 @@ elif page == "Evaluation Results":
                 ep_df["total_reward"] = ep_df["total_reward"].round(2)
             st.dataframe(ep_df, use_container_width=True)
 
-            # Success bar chart
+            # Reward bar chart
             import pandas as pd
             success_data = pd.DataFrame({
                 "Episode": [f"Ep {i+1}" for i in range(len(episodes))],
@@ -244,42 +287,51 @@ elif page == "Evaluation Results":
 elif page == "Experiment History":
     st.header("Experiment History")
 
-    # Training runs
+    # Training runs — show all tasks
     st.subheader("Training Runs")
-    if TRAIN_DIR.exists():
-        # Find checkpoint directories
+    any_training = False
+
+    for label, dirname in TRAIN_TASKS.items():
+        train_dir = TRAIN_ROOT / dirname
+        if not train_dir.exists():
+            continue
+
         checkpoints = sorted(
-            [d for d in TRAIN_DIR.iterdir() if d.is_dir() and d.name.startswith("step_")],
+            [d for d in train_dir.iterdir() if d.is_dir() and d.name.startswith("step_")],
             key=lambda d: d.name,
         )
-        if checkpoints:
-            import pandas as pd
-            rows = []
-            for ckpt in checkpoints:
-                state_file = ckpt / "training_state.json"
-                state = load_json(state_file)
-                rows.append({
-                    "Checkpoint": ckpt.name,
-                    "Step": state.get("step", "?") if state else "?",
-                    "Saved": format_timestamp(ckpt),
-                })
-            st.dataframe(pd.DataFrame(rows), use_container_width=True)
-        else:
-            st.caption("No checkpoints saved yet.")
+        if not checkpoints:
+            continue
 
-        # Loss log info
-        if LOSS_LOG.exists():
-            loss_data = load_json(LOSS_LOG)
+        any_training = True
+        st.caption(f"**{label}** ({train_dir.name})")
+
+        import pandas as pd
+        rows = []
+        for ckpt in checkpoints:
+            state_file = ckpt / "training_state.json"
+            state = load_json(state_file)
+            rows.append({
+                "Checkpoint": ckpt.name,
+                "Step": state.get("step", "?") if state else "?",
+                "Saved": format_timestamp(ckpt),
+            })
+        st.dataframe(pd.DataFrame(rows), use_container_width=True)
+
+        loss_log = train_dir / "loss_history.json"
+        if loss_log.exists():
+            loss_data = load_json(loss_log)
             if loss_data:
                 st.caption(
                     f"Loss log: {len(loss_data)} entries, "
                     f"steps {loss_data[0]['step']}-{loss_data[-1]['step']}, "
-                    f"last updated {format_timestamp(LOSS_LOG)}"
+                    f"last updated {format_timestamp(loss_log)}"
                 )
-    else:
+
+    if not any_training:
         st.info(
             "No training runs found. Start one with:\n\n"
-            "```bash\npython scripts/train.py --steps 5000 --device mps\n```"
+            "```bash\npython scripts/train.py --task pusht --steps 1000\n```"
         )
 
     # Evaluation runs
@@ -294,6 +346,7 @@ elif page == "Experiment History":
                 s = metrics["summary"]
                 rows.append({
                     "Name": d.name,
+                    "Task": s.get("task", "unknown"),
                     "Success Rate": f"{s['success_rate'] * 100:.0f}%",
                     "Avg Reward": f"{s['avg_reward']:.2f}",
                     "Episodes": s["n_episodes"],
@@ -316,10 +369,12 @@ elif page == "Baseline Comparison":
         st.info(
             "Need at least 2 evaluation runs to compare. Run both trained and baseline evaluations:\n\n"
             "```bash\n"
-            "# Evaluate trained model\n"
-            "python scripts/evaluate.py --checkpoint outputs/train/act_transfer_cube/last --device mps\n\n"
+            "# Evaluate trained PushT model\n"
+            "python scripts/evaluate.py --checkpoint outputs/train/diffusion_pusht/last --task pusht\n\n"
+            "# Evaluate trained ALOHA model\n"
+            "python scripts/evaluate.py --checkpoint outputs/train/act_transfer_cube/last\n\n"
             "# Evaluate pretrained baseline\n"
-            "python scripts/evaluate.py --checkpoint lerobot/act_aloha_sim_transfer_cube_human --device mps\n"
+            "python scripts/evaluate.py --checkpoint lerobot/act_aloha_sim_transfer_cube_human\n"
             "```"
         )
     else:
@@ -338,20 +393,20 @@ elif page == "Baseline Comparison":
         if metrics_a and metrics_b:
             sa, sb = metrics_a["summary"], metrics_b["summary"]
 
-            # Side by side metrics
             col1, col2 = st.columns(2)
             with col1:
                 st.subheader(model_a)
+                st.metric("Task", sa.get("task", "unknown"))
                 st.metric("Success Rate", f"{sa['success_rate'] * 100:.0f}%")
                 st.metric("Avg Reward", f"{sa['avg_reward']:.2f}")
                 st.metric("Episodes", sa["n_episodes"])
             with col2:
                 st.subheader(model_b)
+                st.metric("Task", sb.get("task", "unknown"))
                 st.metric("Success Rate", f"{sb['success_rate'] * 100:.0f}%")
                 st.metric("Avg Reward", f"{sb['avg_reward']:.2f}")
                 st.metric("Episodes", sb["n_episodes"])
 
-            # Comparison bar chart
             import pandas as pd
             comp_df = pd.DataFrame({
                 "Metric": ["Success Rate (%)", "Avg Reward"],
@@ -360,7 +415,6 @@ elif page == "Baseline Comparison":
             }).set_index("Metric")
             st.bar_chart(comp_df, use_container_width=True)
 
-            # Static comparison plot
             comp_plot = PLOTS_DIR / "comparison.png"
             if comp_plot.exists():
                 with st.expander("Static comparison plot"):
@@ -368,7 +422,6 @@ elif page == "Baseline Comparison":
         else:
             st.warning("Could not load metrics for one or both selected models.")
 
-    # Even with < 2 eval dirs, show the static comparison plot if it exists
     if len(eval_dirs) < 2:
         comp_plot = PLOTS_DIR / "comparison.png"
         if comp_plot.exists():
@@ -385,47 +438,53 @@ elif page == "Status":
     # Training status
     st.subheader("Training")
     training_active = is_training_running()
-    log_fresh = log_recently_updated()
 
     if training_active:
         st.success("Training process is running")
-    elif log_fresh:
-        st.warning("No training process detected, but log was recently updated")
     else:
         st.info("No training currently running")
 
-    # Loss log status
-    if LOSS_LOG.exists():
-        loss_data = load_json(LOSS_LOG)
-        if loss_data:
-            st.caption(
-                f"Loss log: {len(loss_data)} entries | "
-                f"Steps {loss_data[0]['step']}-{loss_data[-1]['step']} | "
-                f"Last updated: {format_timestamp(LOSS_LOG)}"
-            )
-    else:
-        st.caption("No loss log found.")
+    # Per-task status
+    for label, dirname in TRAIN_TASKS.items():
+        train_dir = TRAIN_ROOT / dirname
+        loss_log = train_dir / "loss_history.json"
+
+        if not train_dir.exists():
+            st.caption(f"{label}: not started")
+            continue
+
+        if loss_log.exists():
+            loss_data = load_json(loss_log)
+            if loss_data:
+                fresh = log_recently_updated(loss_log)
+                status = " (updating)" if fresh else ""
+                st.caption(
+                    f"{label}: {len(loss_data)} entries | "
+                    f"Steps {loss_data[0]['step']}-{loss_data[-1]['step']} | "
+                    f"Last updated: {format_timestamp(loss_log)}{status}"
+                )
+        else:
+            st.caption(f"{label}: directory exists but no loss log")
 
     # Checkpoints
     st.subheader("Checkpoints")
-    if TRAIN_DIR.exists():
+    for label, dirname in TRAIN_TASKS.items():
+        train_dir = TRAIN_ROOT / dirname
+        if not train_dir.exists():
+            continue
+
         checkpoints = sorted(
-            [d for d in TRAIN_DIR.iterdir() if d.is_dir() and d.name.startswith("step_")],
+            [d for d in train_dir.iterdir() if d.is_dir() and d.name.startswith("step_")],
         )
         if checkpoints:
-            st.caption(f"{len(checkpoints)} checkpoint(s) saved")
+            st.caption(f"{label}: {len(checkpoints)} checkpoint(s)")
             for ckpt in checkpoints:
                 st.caption(f"  - {ckpt.name} ({format_timestamp(ckpt)})")
-        else:
-            st.caption("No checkpoints saved.")
 
-        # Check for 'last' symlink
-        last = TRAIN_DIR / "last"
-        if last.exists():
-            target = last.resolve().name if last.is_symlink() else "directory"
-            st.caption(f"  'last' points to: {target}")
-    else:
-        st.caption("Training directory does not exist yet.")
+            last = train_dir / "last"
+            if last.exists():
+                target = last.resolve().name if last.is_symlink() else "directory"
+                st.caption(f"  'last' points to: {target}")
 
     # Eval runs
     st.subheader("Evaluation Runs")
@@ -440,9 +499,8 @@ elif page == "Status":
 
     # Disk usage
     st.subheader("Output Directories")
-    for name, path in [("Train", TRAIN_DIR), ("Eval", EVAL_DIR), ("Plots", PLOTS_DIR)]:
+    for name, path in [("Train", TRAIN_ROOT), ("Eval", EVAL_DIR), ("Plots", PLOTS_DIR)]:
         if path.exists():
-            # Count files
             files = list(path.rglob("*"))
             file_count = len([f for f in files if f.is_file()])
             st.caption(f"{name}: {path} ({file_count} files)")

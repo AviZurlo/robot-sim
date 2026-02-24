@@ -4,18 +4,18 @@ Run open source robot foundation models in simulation. Train policies, watch the
 
 ## What This Does
 
-Runs and trains **ACT (Action Chunking with Transformers)** policies in a MuJoCo simulation of the [ALOHA bimanual robot](https://tonyzhaozh.github.io/aloha/), performing a cube transfer task. Includes:
+Two training modes for robot policy learning:
 
-- **Pretrained baseline**: Run a pretrained policy (~83% success on cube transfer)
-- **Training from scratch**: Train your own ACT policy on 50 human demonstrations
-- **Evaluation**: Compare trained checkpoints against the pretrained baseline
+- **PushT (fast)**: Diffusion Policy on a 2D pushing task — state-only observations, 4.4M params, trains in minutes on CPU
+- **Transfer Cube (full)**: ACT policy on ALOHA bimanual cube transfer — vision+state, 51M params, trains on MPS/GPU
+- **Dashboard**: Live Streamlit monitoring for both tasks
 
 ## Quick Start
 
 ### Prerequisites
 
 - macOS (Apple Silicon) or Linux
-- Python 3.10
+- Python 3.10+
 - [uv](https://docs.astral.sh/uv/) (recommended) or pip
 
 ### Setup
@@ -25,141 +25,115 @@ Runs and trains **ACT (Action Chunking with Transformers)** policies in a MuJoCo
 git clone git@github.com:AviZurlo/robot-sim.git
 cd robot-sim
 
-# Create virtual environment with Python 3.10
-uv venv .venv --python 3.10
+# Create virtual environment
+uv venv .venv --python 3.12
 source .venv/bin/activate
 
-# Clone and install LeRobot with MuJoCo/Aloha simulation support
-git clone https://github.com/huggingface/lerobot.git
-uv pip install -e "lerobot[aloha]"
+# Install LeRobot with simulation support
+uv pip install 'lerobot[aloha,pusht]' streamlit
 ```
 
-### Run Simulation
+### Fast Training (PushT)
+
+Train a Diffusion Policy on the PushT 2D pushing task. State-only observations, no video decoding — trains in minutes on CPU.
 
 ```bash
-# Run 3 episodes with the pretrained ACT policy (default)
+# Train for 1000 steps (~4.5 min on CPU)
+python scripts/train.py --task pusht --steps 1000
+
+# Evaluate the trained policy
+python scripts/evaluate.py --checkpoint outputs/train/diffusion_pusht/last --task pusht
+
+# Or run the full pipeline in one command
+python scripts/run_experiment.py --task pusht --steps 1000 --n-episodes 10
+```
+
+### Full Training (Transfer Cube)
+
+Train an ACT policy on the ALOHA bimanual cube transfer task. Vision+state observations, requires MPS or GPU.
+
+```bash
+# Train for 5000 steps (~60 min on MPS)
+python scripts/train.py --task transfer_cube --steps 5000 --device mps
+
+# Evaluate
+python scripts/evaluate.py --checkpoint outputs/train/act_transfer_cube/last
+
+# With pretrained baseline comparison
+python scripts/run_experiment.py --task transfer_cube --steps 5000 --device mps --baseline
+```
+
+### Run Pretrained Simulation
+
+```bash
+# Run 3 episodes with the pretrained ACT policy
 python scripts/run_sim.py
 
-# Customize the run
+# Customize
 python scripts/run_sim.py --n-episodes 5 --device mps
-python scripts/run_sim.py --policy lerobot/act_aloha_sim_insertion_human --task AlohaInsertion-v0
 ```
 
-Videos are saved to `outputs/videos/` along with `eval_metrics.json`.
+Videos are saved to `outputs/videos/`.
 
-### CLI Options
+## Training Options
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--policy` | `lerobot/act_aloha_sim_transfer_cube_human` | HuggingFace model ID |
-| `--task` | `AlohaTransferCube-v0` | Gymnasium environment task |
-| `--n-episodes` | `3` | Number of episodes to run |
+| `--task` | `transfer_cube` | Task: `pusht` (fast) or `transfer_cube` (full) |
+| `--steps` | task-dependent | Total training steps (pusht: 1000, transfer_cube: 5000) |
+| `--batch-size` | task-dependent | Batch size (pusht: 64, transfer_cube: 8) |
+| `--lr` | task-dependent | Learning rate (pusht: 1e-4, transfer_cube: 1e-5) |
 | `--device` | `cpu` | Compute device: `cpu`, `mps`, or `cuda` |
-| `--output-dir` | `outputs/videos` | Video output directory |
-| `--seed` | `1000` | Starting random seed |
-
-## Train a Custom Policy
-
-Train an ACT policy from scratch on 50 human demonstrations from the [aloha_sim_transfer_cube_human](https://huggingface.co/datasets/lerobot/aloha_sim_transfer_cube_human) dataset.
-
-### Training
-
-```bash
-# Quick test (~2 min on MPS)
-python scripts/train.py --steps 100 --device mps
-
-# Short run (~15 min on MPS, loss drops significantly)
-python scripts/train.py --steps 1000 --device mps
-
-# Full run (~60 min on MPS, enough to see real learning)
-python scripts/train.py --steps 5000 --device mps
-
-# Resume from last checkpoint
-python scripts/train.py --steps 5000 --device mps --resume
-```
-
-Checkpoints are saved to `outputs/train/act_transfer_cube/` with a loss history log.
-
-#### Training Options
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--steps` | `5000` | Total training steps |
-| `--batch-size` | `8` | Training batch size |
-| `--lr` | `1e-5` | Learning rate |
-| `--device` | `cpu` | Compute device: `cpu`, `mps`, or `cuda` |
-| `--output-dir` | `outputs/train/act_transfer_cube` | Checkpoint directory |
+| `--output-dir` | task-dependent | Checkpoint directory |
 | `--log-freq` | `50` | Log every N steps |
 | `--save-freq` | `1000` | Save checkpoint every N steps |
 | `--resume` | - | Resume from last checkpoint |
 
-### Evaluation
-
-Evaluate a trained checkpoint and compare against the pretrained baseline:
-
-```bash
-# Evaluate your trained policy
-python scripts/evaluate.py --checkpoint outputs/train/act_transfer_cube/last --device mps
-
-# Evaluate pretrained baseline for comparison
-python scripts/evaluate.py --checkpoint lerobot/act_aloha_sim_transfer_cube_human --device mps
-
-# Customize
-python scripts/evaluate.py --checkpoint outputs/train/act_transfer_cube/last \
-    --n-episodes 10 --device mps
-```
-
-Videos and metrics are saved to `outputs/eval/`.
-
-#### Evaluation Options
+## Evaluation Options
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--checkpoint` | (required) | Local checkpoint path or HuggingFace model ID |
+| `--task` | `transfer_cube` | Task: `pusht` or `transfer_cube` |
 | `--n-episodes` | `10` | Number of evaluation episodes |
 | `--device` | `cpu` | Compute device |
-| `--task` | `AlohaTransferCube-v0` | Environment task |
 | `--output-dir` | `outputs/eval/<name>` | Output directory |
 
-### Live Dashboard
+## Live Dashboard
 
-A real-time Streamlit dashboard for monitoring training experiments. Accessible over the network via Tailscale.
+Real-time Streamlit dashboard for monitoring training experiments. Supports both PushT and Transfer Cube tasks.
 
 ```bash
-# Install streamlit (included in project dependencies)
-uv pip install streamlit
-
-# Launch dashboard (binds to 0.0.0.0:8501)
 bash scripts/start_dashboard.sh
 ```
 
-Access at `http://<your-tailscale-ip>:8501` or `http://localhost:8501` locally.
-
-**Dashboard pages:**
+Access at `http://localhost:8501` or `http://<tailscale-ip>:8501`.
 
 | Page | What it shows |
 |------|--------------|
-| **Live Training** | Auto-refreshing loss curves that update as training runs |
-| **Evaluation Results** | Success rate, rewards, and eval videos |
-| **Experiment History** | Past training checkpoints and evaluation runs |
-| **Baseline Comparison** | Side-by-side trained vs pretrained metrics |
-| **Status** | Training process status, checkpoints, disk usage |
+| **Live Training** | Auto-refreshing loss curves, task selector |
+| **Evaluation Results** | Success rate, rewards, eval videos |
+| **Experiment History** | Training checkpoints and evaluation runs for all tasks |
+| **Baseline Comparison** | Side-by-side metrics comparison |
+| **Status** | Per-task training status, checkpoints, disk usage |
 
-The dashboard works even when no training data exists yet — it shows helpful empty states with instructions.
+## Results
 
-### Static Results
+### PushT — Diffusion Policy (1000 steps, CPU)
 
-Training loss drops rapidly from ~101 to ~2.7 over 500 steps, showing the model is learning action patterns. The pretrained baseline (100k steps) achieves 80% success; our 500-step model hasn't converged yet but the loss curve shows clear progress.
-
-#### Training Loss
+| Metric | Value |
+|--------|------:|
+| Loss | 1.34 → 0.066 |
+| Training Time | 4.5 min |
+| Parameters | 4.4M |
+| Success Rate | 0% (10 episodes) |
+| Avg Reward | 17.75 |
 
 ![Training Loss](outputs/plots/training_loss.png)
 
-#### Trained vs Pretrained Baseline
+![Eval Rewards](outputs/plots/eval_rewards.png)
 
-![Comparison](outputs/plots/comparison.png)
-
-#### Evaluation Results
+### Transfer Cube — ACT (500 steps, MPS)
 
 | Metric | Ours (500 steps) | Pretrained (100k steps) |
 |--------|----------------:|------------------------:|
@@ -167,87 +141,37 @@ Training loss drops rapidly from ~101 to ~2.7 over 500 steps, showing the model 
 | Avg Reward | 0.00 | 179.80 |
 | Training Time | 5 min | ~60+ min |
 
-![Eval Success](outputs/plots/eval_success.png)
-
-![Eval Rewards](outputs/plots/eval_rewards.png)
-
-### Generate Plots
-
-```bash
-# Generate all visualization plots from existing data
-python scripts/visualize.py
-
-# Full experiment: train → evaluate → plot (one command)
-python scripts/run_experiment.py --steps 500 --n-episodes 5 --device mps
-
-# Full experiment with pretrained baseline comparison
-python scripts/run_experiment.py --steps 5000 --n-episodes 10 --device mps --baseline
-```
-
-#### Visualize Options
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--train-log` | `outputs/train/act_transfer_cube/loss_history.json` | Training loss log |
-| `--eval-metrics` | `outputs/eval/last/eval_metrics.json` | Evaluation metrics |
-| `--baseline-metrics` | `outputs/eval/lerobot_act_aloha_sim_transfer_cube_human/eval_metrics.json` | Baseline metrics |
-| `--output-dir` | `outputs/plots` | Plot output directory |
-
-#### Experiment Runner Options
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--steps` | `5000` | Training steps |
-| `--n-episodes` | `10` | Evaluation episodes |
-| `--device` | `cpu` | Compute device |
-| `--baseline` | - | Also evaluate pretrained baseline |
-| `--skip-train` | - | Skip training, only evaluate + plot |
-| `--skip-eval` | - | Skip evaluation, only plot |
-
-### Training Details
-
-Training an ACT policy from scratch on this task:
-
-- **Loss**: Drops from ~100 to ~0.20 over 5000 steps (L1 action loss + KL divergence)
-- **Dataset**: 50 human demonstrations, 20,000 frames at 50 FPS
-- **Time**: ~60 min on Apple Silicon MPS for 5000 steps
-
-The pretrained model on HuggingFace was trained for 100,000 steps. With 5,000 steps you get a policy that has learned basic movement patterns but hasn't converged to full task success yet.
-
 ## Architecture
 
-- **Framework:** [LeRobot](https://github.com/huggingface/lerobot) v0.4.4 (Hugging Face)
-- **Simulation:** [MuJoCo](https://mujoco.org/) 3.5 via [gym-aloha](https://github.com/huggingface/gym-aloha)
-- **Policy:** ACT (Action Chunking with Transformers) - 51M params
-- **Environment:** `AlohaTransferCube-v0` - bimanual robot transfers a cube between grippers
-- **Observation:** RGB camera (480x640) + 14-DOF joint positions
-- **Action space:** 14-DOF continuous (7 per arm)
-
-## Available Pretrained Models
-
-| Model | Task | Environment |
-|-------|------|-------------|
-| `lerobot/act_aloha_sim_transfer_cube_human` | Cube transfer | `AlohaTransferCube-v0` |
-| `lerobot/act_aloha_sim_insertion_human` | Peg insertion | `AlohaInsertion-v0` |
+| | PushT (Fast) | Transfer Cube (Full) |
+|---|---|---|
+| **Policy** | Diffusion Policy (DDPM) | ACT (Transformers) |
+| **Parameters** | 4.4M | 51.6M |
+| **Observations** | 2D state (agent position) | RGB camera + 14-DOF joints |
+| **Actions** | 2D continuous | 14-DOF continuous |
+| **Dataset** | `lerobot/pusht` (206 demos) | `lerobot/aloha_sim_transfer_cube_human` (50 demos) |
+| **Environment** | PushT-v0 (PyGame) | AlohaTransferCube-v0 (MuJoCo) |
+| **Training Speed** | ~4.5 steps/s (CPU) | ~1.4 steps/s (MPS) |
 
 ## Project Structure
 
 ```
 .
 ├── scripts/
-│   ├── run_sim.py          # Run pretrained policy in sim
-│   ├── train.py            # Train ACT policy from scratch
+│   ├── train.py            # Train policies (--task pusht or transfer_cube)
 │   ├── evaluate.py         # Evaluate trained checkpoints
-│   ├── visualize.py        # Generate plots from training/eval data
 │   ├── run_experiment.py   # Chain: train → evaluate → visualize
+│   ├── visualize.py        # Generate plots from training/eval data
 │   ├── dashboard.py        # Live Streamlit monitoring dashboard
+│   ├── run_sim.py          # Run pretrained policy in sim
 │   └── start_dashboard.sh  # Launch dashboard on 0.0.0.0:8501
-├── lerobot/                 # LeRobot source (git-ignored, cloned during setup)
 ├── .streamlit/
 │   └── config.toml          # Streamlit dark theme config
 ├── outputs/
 │   ├── plots/               # Visualization PNGs (tracked in git)
 │   ├── train/               # Training checkpoints and loss logs (git-ignored)
+│   │   ├── diffusion_pusht/     # PushT training outputs
+│   │   └── act_transfer_cube/   # ALOHA training outputs
 │   ├── eval/                # Evaluation videos and metrics (git-ignored)
 │   └── videos/              # Pretrained policy videos (git-ignored)
 ├── PROJECT.md               # Project roadmap and log
