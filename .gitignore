@@ -208,5 +208,6 @@ __marimo__/
 
 # Project-specific
 lerobot/
-outputs/
+outputs/*
+!outputs/plots/
 *.mp4

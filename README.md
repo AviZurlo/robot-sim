@@ -121,13 +121,70 @@ Videos and metrics are saved to `outputs/eval/`.
 | `--task` | `AlohaTransferCube-v0` | Environment task |
 | `--output-dir` | `outputs/eval/<name>` | Output directory |
 
-### Training Results
+### Results Dashboard
 
-Training an ACT policy from scratch on this task (5000 steps, batch size 8, MPS):
+Training loss drops rapidly from ~101 to ~2.7 over 500 steps, showing the model is learning action patterns. The pretrained baseline (100k steps) achieves 80% success; our 500-step model hasn't converged yet but the loss curve shows clear progress.
+
+#### Training Loss
+
+![Training Loss](outputs/plots/training_loss.png)
+
+#### Trained vs Pretrained Baseline
+
+![Comparison](outputs/plots/comparison.png)
+
+#### Evaluation Results
+
+| Metric | Ours (500 steps) | Pretrained (100k steps) |
+|--------|----------------:|------------------------:|
+| Success Rate | 0% | 80% |
+| Avg Reward | 0.00 | 179.80 |
+| Training Time | 5 min | ~60+ min |
+
+![Eval Success](outputs/plots/eval_success.png)
+
+![Eval Rewards](outputs/plots/eval_rewards.png)
+
+### Generate Plots
+
+```bash
+# Generate all visualization plots from existing data
+python scripts/visualize.py
+
+# Full experiment: train → evaluate → plot (one command)
+python scripts/run_experiment.py --steps 500 --n-episodes 5 --device mps
+
+# Full experiment with pretrained baseline comparison
+python scripts/run_experiment.py --steps 5000 --n-episodes 10 --device mps --baseline
+```
+
+#### Visualize Options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--train-log` | `outputs/train/act_transfer_cube/loss_history.json` | Training loss log |
+| `--eval-metrics` | `outputs/eval/last/eval_metrics.json` | Evaluation metrics |
+| `--baseline-metrics` | `outputs/eval/lerobot_act_aloha_sim_transfer_cube_human/eval_metrics.json` | Baseline metrics |
+| `--output-dir` | `outputs/plots` | Plot output directory |
+
+#### Experiment Runner Options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--steps` | `5000` | Training steps |
+| `--n-episodes` | `10` | Evaluation episodes |
+| `--device` | `cpu` | Compute device |
+| `--baseline` | - | Also evaluate pretrained baseline |
+| `--skip-train` | - | Skip training, only evaluate + plot |
+| `--skip-eval` | - | Skip evaluation, only plot |
+
+### Training Details
+
+Training an ACT policy from scratch on this task:
 
 - **Loss**: Drops from ~100 to ~0.20 over 5000 steps (L1 action loss + KL divergence)
 - **Dataset**: 50 human demonstrations, 20,000 frames at 50 FPS
-- **Time**: ~60 min on Apple Silicon MPS
+- **Time**: ~60 min on Apple Silicon MPS for 5000 steps
 
 The pretrained model on HuggingFace was trained for 100,000 steps. With 5,000 steps you get a policy that has learned basic movement patterns but hasn't converged to full task success yet.
 
@@ -154,9 +211,12 @@ The pretrained model on HuggingFace was trained for 100,000 steps. With 5,000 st
 ├── scripts/
 │   ├── run_sim.py          # Run pretrained policy in sim
 │   ├── train.py            # Train ACT policy from scratch
-│   └── evaluate.py         # Evaluate trained checkpoints
+│   ├── evaluate.py         # Evaluate trained checkpoints
+│   ├── visualize.py        # Generate plots from training/eval data
+│   └── run_experiment.py   # Chain: train → evaluate → visualize
 ├── lerobot/                 # LeRobot source (git-ignored, cloned during setup)
 ├── outputs/
+│   ├── plots/               # Visualization PNGs (tracked in git)
 │   ├── train/               # Training checkpoints and loss logs (git-ignored)
 │   ├── eval/                # Evaluation videos and metrics (git-ignored)
 │   └── videos/              # Pretrained policy videos (git-ignored)
