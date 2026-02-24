@@ -4,7 +4,11 @@ Run open source robot foundation models in simulation. Train policies, watch the
 
 ## What This Does
 
-Runs a pretrained **ACT (Action Chunking with Transformers)** policy in a MuJoCo simulation of the [ALOHA bimanual robot](https://tonyzhaozh.github.io/aloha/), performing a cube transfer task. The policy was trained on human demonstrations and achieves ~83% success rate on the task.
+Runs and trains **ACT (Action Chunking with Transformers)** policies in a MuJoCo simulation of the [ALOHA bimanual robot](https://tonyzhaozh.github.io/aloha/), performing a cube transfer task. Includes:
+
+- **Pretrained baseline**: Run a pretrained policy (~83% success on cube transfer)
+- **Training from scratch**: Train your own ACT policy on 50 human demonstrations
+- **Evaluation**: Compare trained checkpoints against the pretrained baseline
 
 ## Quick Start
 
@@ -54,6 +58,79 @@ Videos are saved to `outputs/videos/` along with `eval_metrics.json`.
 | `--output-dir` | `outputs/videos` | Video output directory |
 | `--seed` | `1000` | Starting random seed |
 
+## Train a Custom Policy
+
+Train an ACT policy from scratch on 50 human demonstrations from the [aloha_sim_transfer_cube_human](https://huggingface.co/datasets/lerobot/aloha_sim_transfer_cube_human) dataset.
+
+### Training
+
+```bash
+# Quick test (~2 min on MPS)
+python scripts/train.py --steps 100 --device mps
+
+# Short run (~15 min on MPS, loss drops significantly)
+python scripts/train.py --steps 1000 --device mps
+
+# Full run (~60 min on MPS, enough to see real learning)
+python scripts/train.py --steps 5000 --device mps
+
+# Resume from last checkpoint
+python scripts/train.py --steps 5000 --device mps --resume
+```
+
+Checkpoints are saved to `outputs/train/act_transfer_cube/` with a loss history log.
+
+#### Training Options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--steps` | `5000` | Total training steps |
+| `--batch-size` | `8` | Training batch size |
+| `--lr` | `1e-5` | Learning rate |
+| `--device` | `cpu` | Compute device: `cpu`, `mps`, or `cuda` |
+| `--output-dir` | `outputs/train/act_transfer_cube` | Checkpoint directory |
+| `--log-freq` | `50` | Log every N steps |
+| `--save-freq` | `1000` | Save checkpoint every N steps |
+| `--resume` | - | Resume from last checkpoint |
+
+### Evaluation
+
+Evaluate a trained checkpoint and compare against the pretrained baseline:
+
+```bash
+# Evaluate your trained policy
+python scripts/evaluate.py --checkpoint outputs/train/act_transfer_cube/last --device mps
+
+# Evaluate pretrained baseline for comparison
+python scripts/evaluate.py --checkpoint lerobot/act_aloha_sim_transfer_cube_human --device mps
+
+# Customize
+python scripts/evaluate.py --checkpoint outputs/train/act_transfer_cube/last \
+    --n-episodes 10 --device mps
+```
+
+Videos and metrics are saved to `outputs/eval/`.
+
+#### Evaluation Options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--checkpoint` | (required) | Local checkpoint path or HuggingFace model ID |
+| `--n-episodes` | `10` | Number of evaluation episodes |
+| `--device` | `cpu` | Compute device |
+| `--task` | `AlohaTransferCube-v0` | Environment task |
+| `--output-dir` | `outputs/eval/<name>` | Output directory |
+
+### Training Results
+
+Training an ACT policy from scratch on this task (5000 steps, batch size 8, MPS):
+
+- **Loss**: Drops from ~100 to ~0.20 over 5000 steps (L1 action loss + KL divergence)
+- **Dataset**: 50 human demonstrations, 20,000 frames at 50 FPS
+- **Time**: ~60 min on Apple Silicon MPS
+
+The pretrained model on HuggingFace was trained for 100,000 steps. With 5,000 steps you get a policy that has learned basic movement patterns but hasn't converged to full task success yet.
+
 ## Architecture
 
 - **Framework:** [LeRobot](https://github.com/huggingface/lerobot) v0.4.4 (Hugging Face)
@@ -75,9 +152,14 @@ Videos are saved to `outputs/videos/` along with `eval_metrics.json`.
 ```
 .
 ├── scripts/
-│   └── run_sim.py          # Main simulation runner
+│   ├── run_sim.py          # Run pretrained policy in sim
+│   ├── train.py            # Train ACT policy from scratch
+│   └── evaluate.py         # Evaluate trained checkpoints
 ├── lerobot/                 # LeRobot source (git-ignored, cloned during setup)
-├── outputs/videos/          # Generated videos and metrics (git-ignored)
+├── outputs/
+│   ├── train/               # Training checkpoints and loss logs (git-ignored)
+│   ├── eval/                # Evaluation videos and metrics (git-ignored)
+│   └── videos/              # Pretrained policy videos (git-ignored)
 ├── PROJECT.md               # Project roadmap and log
 ├── pyproject.toml           # Python project metadata
 └── README.md

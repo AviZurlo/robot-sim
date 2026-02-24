@@ -2,9 +2,9 @@
 
 Run open source robot foundation models in simulation. Train policies, watch them improve with data.
 
-## Status: Simulation Running
+## Status: Training Pipeline Ready
 
-**Current phase:** Pretrained policy running in sim. Ready for data collection and training.
+**Current phase:** Custom policy training pipeline built. ACT policy trains from scratch on human demos.
 
 ## Architecture
 
@@ -26,20 +26,25 @@ Run open source robot foundation models in simulation. Train policies, watch the
 |------|-------------|
 | 2026-02-24 | Project created. LeRobot selected as framework. |
 | 2026-02-24 | LeRobot v0.4.4 + MuJoCo 3.5 + gym-aloha installed. ACT policy running in sim (100% success on cube transfer). |
+| 2026-02-24 | Training pipeline: train.py + evaluate.py. ACT trains from scratch on `lerobot/aloha_sim_transfer_cube_human` (50 demos, 20k frames). Loss drops from ~100 to ~0.20 over 5000 steps on MPS. |
 
-## Setup
+## Training Details
 
-```bash
-git clone git@github.com:AviZurlo/robot-sim.git
-cd robot-sim
-# Setup instructions will be added as we build
-```
+- **Dataset:** `lerobot/aloha_sim_transfer_cube_human` — 50 human demos, 20,000 frames at 50 FPS
+- **Policy:** ACT (Action Chunking with Transformers) — 51.6M params
+- **Observations:** RGB camera (480x640) + 14-DOF joint positions
+- **Actions:** 14-DOF continuous (chunk size 100)
+- **Optimizer:** AdamW, lr=1e-5, weight_decay=1e-4, grad_clip=10.0
+- **Loss:** L1 action prediction + KL divergence (VAE, weight=10.0)
+- **Training speed:** ~1.4 steps/s on MPS (Apple Silicon), ~60 min for 5000 steps
 
 ## What's Next
 
 - [x] Install LeRobot + dependencies (MuJoCo, Gymnasium)
 - [x] Run a pretrained model in simulation
 - [x] Evaluate and document results
-- [ ] Collect simulation data and train a custom policy
+- [x] Train a custom ACT policy from scratch
+- [x] Evaluate trained checkpoints vs pretrained baseline
+- [ ] Train for more steps (50k-100k) to match pretrained performance
 - [ ] Try different policy architectures (Diffusion Policy, VQ-BeT)
 - [ ] Experiment with domain randomization
