@@ -121,7 +121,33 @@ Videos and metrics are saved to `outputs/eval/`.
 | `--task` | `AlohaTransferCube-v0` | Environment task |
 | `--output-dir` | `outputs/eval/<name>` | Output directory |
 
-### Results Dashboard
+### Live Dashboard
+
+A real-time Streamlit dashboard for monitoring training experiments. Accessible over the network via Tailscale.
+
+```bash
+# Install streamlit (included in project dependencies)
+uv pip install streamlit
+
+# Launch dashboard (binds to 0.0.0.0:8501)
+bash scripts/start_dashboard.sh
+```
+
+Access at `http://<your-tailscale-ip>:8501` or `http://localhost:8501` locally.
+
+**Dashboard pages:**
+
+| Page | What it shows |
+|------|--------------|
+| **Live Training** | Auto-refreshing loss curves that update as training runs |
+| **Evaluation Results** | Success rate, rewards, and eval videos |
+| **Experiment History** | Past training checkpoints and evaluation runs |
+| **Baseline Comparison** | Side-by-side trained vs pretrained metrics |
+| **Status** | Training process status, checkpoints, disk usage |
+
+The dashboard works even when no training data exists yet — it shows helpful empty states with instructions.
+
+### Static Results
 
 Training loss drops rapidly from ~101 to ~2.7 over 500 steps, showing the model is learning action patterns. The pretrained baseline (100k steps) achieves 80% success; our 500-step model hasn't converged yet but the loss curve shows clear progress.
 
@@ -213,8 +239,12 @@ The pretrained model on HuggingFace was trained for 100,000 steps. With 5,000 st
 │   ├── train.py            # Train ACT policy from scratch
 │   ├── evaluate.py         # Evaluate trained checkpoints
 │   ├── visualize.py        # Generate plots from training/eval data
-│   └── run_experiment.py   # Chain: train → evaluate → visualize
+│   ├── run_experiment.py   # Chain: train → evaluate → visualize
+│   ├── dashboard.py        # Live Streamlit monitoring dashboard
+│   └── start_dashboard.sh  # Launch dashboard on 0.0.0.0:8501
 ├── lerobot/                 # LeRobot source (git-ignored, cloned during setup)
+├── .streamlit/
+│   └── config.toml          # Streamlit dark theme config
 ├── outputs/
 │   ├── plots/               # Visualization PNGs (tracked in git)
 │   ├── train/               # Training checkpoints and loss logs (git-ignored)
