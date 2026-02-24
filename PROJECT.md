@@ -2,9 +2,9 @@
 
 Run open source robot foundation models in simulation. Train policies, watch them improve with data.
 
-## Status: Training Pipeline Ready
+## Status: Results Dashboard Live
 
-**Current phase:** Custom policy training pipeline built. ACT policy trains from scratch on human demos.
+**Current phase:** Visualization pipeline built. Training loss curves, eval metrics, and baseline comparisons auto-generated as PNG plots.
 
 ## Architecture
 
@@ -27,6 +27,7 @@ Run open source robot foundation models in simulation. Train policies, watch the
 | 2026-02-24 | Project created. LeRobot selected as framework. |
 | 2026-02-24 | LeRobot v0.4.4 + MuJoCo 3.5 + gym-aloha installed. ACT policy running in sim (100% success on cube transfer). |
 | 2026-02-24 | Training pipeline: train.py + evaluate.py. ACT trains from scratch on `lerobot/aloha_sim_transfer_cube_human` (50 demos, 20k frames). Loss drops from ~100 to ~0.20 over 5000 steps on MPS. |
+| 2026-02-24 | Results dashboard: visualize.py + run_experiment.py. 500-step training run: loss 101→2.7, 0% success (vs 80% pretrained baseline). Plots in `outputs/plots/`. |
 
 ## Training Details
 
@@ -38,6 +39,15 @@ Run open source robot foundation models in simulation. Train policies, watch the
 - **Loss:** L1 action prediction + KL divergence (VAE, weight=10.0)
 - **Training speed:** ~1.4 steps/s on MPS (Apple Silicon), ~60 min for 5000 steps
 
+## Experiment Results (500-step run)
+
+| Metric | Ours (500 steps) | Pretrained (100k steps) |
+|--------|----------------:|------------------------:|
+| Loss (final) | 2.71 | — |
+| Success Rate | 0% (0/5) | 80% (4/5) |
+| Avg Reward | 0.00 | 179.80 |
+| Training Time | 5.2 min | — |
+
 ## What's Next
 
 - [x] Install LeRobot + dependencies (MuJoCo, Gymnasium)
@@ -45,6 +55,7 @@ Run open source robot foundation models in simulation. Train policies, watch the
 - [x] Evaluate and document results
 - [x] Train a custom ACT policy from scratch
 - [x] Evaluate trained checkpoints vs pretrained baseline
+- [x] Build results visualization dashboard
 - [ ] Train for more steps (50k-100k) to match pretrained performance
 - [ ] Try different policy architectures (Diffusion Policy, VQ-BeT)
 - [ ] Experiment with domain randomization
