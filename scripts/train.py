@@ -1,21 +1,19 @@
 #!/usr/bin/env python
-"""Train an ACT policy from scratch on the ALOHA sim transfer cube task.
+"""Train a policy from scratch on robot simulation tasks.
 
-Downloads human demonstration data from HuggingFace Hub and trains an ACT
-(Action Chunking with Transformers) policy using LeRobot's training pipeline.
+Supports two tasks:
+  - transfer_cube: ACT policy on ALOHA bimanual cube transfer (51M params, vision+state, slow)
+  - pusht: Diffusion Policy on PushT 2D pushing task (4.4M params, state-only, fast)
 
 Usage:
-    # Quick test (100 steps, ~2 min on MPS)
-    python scripts/train.py --steps 100 --device mps
+    # Fast PushT training (state-only, ~3 min on CPU for 1000 steps)
+    python scripts/train.py --task pusht --steps 1000
 
-    # Short training run (~10 min on MPS)
-    python scripts/train.py --steps 1000 --device mps
-
-    # Full training run (~30 min on MPS, enough to see learning)
-    python scripts/train.py --steps 5000 --device mps
+    # ALOHA transfer cube (vision, slow)
+    python scripts/train.py --task transfer_cube --steps 5000 --device mps
 
     # Resume from checkpoint
-    python scripts/train.py --steps 5000 --device mps --resume
+    python scripts/train.py --task pusht --steps 2000 --resume
 """
 
 import argparse
@@ -25,15 +23,29 @@ from pathlib import Path
 
 import torch
 
-from lerobot.configs.types import FeatureType
+from lerobot.configs.types import FeatureType, PolicyFeature
 from lerobot.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
 from lerobot.datasets.utils import dataset_to_policy_features
-from lerobot.policies.act.configuration_act import ACTConfig
-from lerobot.policies.act.modeling_act import ACTPolicy
 from lerobot.policies.factory import make_pre_post_processors
 
 
-DATASET_ID = "lerobot/aloha_sim_transfer_cube_human"
+# Task configurations
+TASKS = {
+    "transfer_cube": {
+        "dataset": "lerobot/aloha_sim_transfer_cube_human",
+        "policy_type": "act",
+        "output_dir": "outputs/train/act_transfer_cube",
+        "batch_size": 8,
+        "lr": 1e-5,
+    },
+    "pusht": {
+        "dataset": "lerobot/pusht",
+        "policy_type": "diffusion",
+        "output_dir": "outputs/train/diffusion_pusht",
+        "batch_size": 64,
+        "lr": 1e-4,
+    },
+}
 
 
 def make_delta_timestamps(delta_indices: list[int] | None, fps: int) -> list[float]:
@@ -42,15 +54,80 @@ def make_delta_timestamps(delta_indices: list[int] | None, fps: int) -> list[flo
     return [i / fps for i in delta_indices]
 
 
+def setup_act(ds_meta, features, args):
+    """Set up ACT policy for transfer_cube task."""
+    from lerobot.policies.act.configuration_act import ACTConfig
+    from lerobot.policies.act.modeling_act import ACTPolicy
+
+    output_features = {k: ft for k, ft in features.items() if ft.type is FeatureType.ACTION}
+    input_features = {k: ft for k, ft in features.items() if k not in output_features}
+
+    cfg = ACTConfig(input_features=input_features, output_features=output_features)
+    cfg.optimizer_lr = args.lr
+    cfg.optimizer_lr_backbone = args.lr
+
+    # Delta timestamps for ACT
+    delta_timestamps = {
+        "action": make_delta_timestamps(cfg.action_delta_indices, ds_meta.fps),
+    }
+    delta_timestamps |= {
+        k: make_delta_timestamps(cfg.observation_delta_indices, ds_meta.fps)
+        for k in cfg.image_features
+    }
+
+    return cfg, ACTPolicy, delta_timestamps
+
+
+def setup_diffusion_pusht(ds_meta, features, args):
+    """Set up Diffusion Policy for PushT task (state-only, no images)."""
+    from lerobot.policies.diffusion.configuration_diffusion import DiffusionConfig
+    from lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
+
+    output_features = {k: ft for k, ft in features.items() if ft.type is FeatureType.ACTION}
+
+    # State-only: use observation.state as STATE, duplicate as ENV to satisfy
+    # DiffusionConfig's requirement for at least one image or environment state.
+    state_shape = features["observation.state"].shape
+    input_features = {
+        "observation.state": PolicyFeature(type=FeatureType.STATE, shape=state_shape),
+        "observation.environment_state": PolicyFeature(type=FeatureType.ENV, shape=state_shape),
+    }
+
+    cfg = DiffusionConfig(
+        input_features=input_features,
+        output_features=output_features,
+        # Small network for fast CPU training
+        down_dims=(64, 128, 256),
+        n_obs_steps=2,
+        horizon=16,
+        n_action_steps=8,
+        num_inference_steps=10,
+        device=args.device,
+    )
+    cfg.optimizer_lr = args.lr
+
+    # Delta timestamps for Diffusion Policy (n_obs_steps=2 at 10fps)
+    obs_ts = [i / ds_meta.fps for i in range(-(cfg.n_obs_steps - 1), 1)]
+    action_ts = [i / ds_meta.fps for i in range(-(cfg.n_obs_steps - 1), cfg.horizon - cfg.n_obs_steps + 1)]
+
+    delta_timestamps = {
+        "observation.state": obs_ts,
+        "action": action_ts,
+    }
+
+    return cfg, DiffusionPolicy, delta_timestamps
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Train ACT policy on ALOHA sim transfer cube")
-    parser.add_argument("--dataset", type=str, default=DATASET_ID, help="HuggingFace dataset ID")
-    parser.add_argument("--steps", type=int, default=5000, help="Total training steps")
-    parser.add_argument("--batch-size", type=int, default=8, help="Training batch size")
-    parser.add_argument("--lr", type=float, default=1e-5, help="Learning rate")
+    parser = argparse.ArgumentParser(description="Train a policy on robot simulation tasks")
+    parser.add_argument("--task", type=str, default="transfer_cube",
+                        choices=list(TASKS.keys()),
+                        help="Task: 'transfer_cube' (ACT, slow) or 'pusht' (Diffusion, fast)")
+    parser.add_argument("--steps", type=int, default=None, help="Total training steps")
+    parser.add_argument("--batch-size", type=int, default=None, help="Training batch size")
+    parser.add_argument("--lr", type=float, default=None, help="Learning rate")
     parser.add_argument("--device", type=str, default="cpu", help="Device: cpu, mps, or cuda")
-    parser.add_argument("--output-dir", type=str, default="outputs/train/act_transfer_cube",
-                        help="Directory to save checkpoints")
+    parser.add_argument("--output-dir", type=str, default=None, help="Directory to save checkpoints")
     parser.add_argument("--log-freq", type=int, default=50, help="Log every N steps")
     parser.add_argument("--save-freq", type=int, default=1000, help="Save checkpoint every N steps")
     parser.add_argument("--num-workers", type=int, default=4, help="DataLoader workers")
@@ -58,13 +135,25 @@ def main():
     parser.add_argument("--resume", action="store_true", help="Resume from last checkpoint")
     args = parser.parse_args()
 
+    # Apply task defaults for unset args
+    task_cfg = TASKS[args.task]
+    if args.steps is None:
+        args.steps = 1000 if args.task == "pusht" else 5000
+    if args.batch_size is None:
+        args.batch_size = task_cfg["batch_size"]
+    if args.lr is None:
+        args.lr = task_cfg["lr"]
+    if args.output_dir is None:
+        args.output_dir = task_cfg["output_dir"]
+    dataset_id = task_cfg["dataset"]
+
     torch.manual_seed(args.seed)
     device = torch.device(args.device)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"Training ACT policy from scratch")
-    print(f"  Dataset:    {args.dataset}")
+    print(f"Training {task_cfg['policy_type'].upper()} policy — task: {args.task}")
+    print(f"  Dataset:    {dataset_id}")
     print(f"  Steps:      {args.steps}")
     print(f"  Batch size: {args.batch_size}")
     print(f"  LR:         {args.lr}")
@@ -72,44 +161,40 @@ def main():
     print(f"  Output:     {output_dir}")
     print()
 
-    # 1. Load dataset metadata (features, stats, fps)
+    # 1. Load dataset metadata
     print("Loading dataset metadata...")
-    ds_meta = LeRobotDatasetMetadata(args.dataset)
+    ds_meta = LeRobotDatasetMetadata(dataset_id)
     features = dataset_to_policy_features(ds_meta.features)
-    output_features = {k: ft for k, ft in features.items() if ft.type is FeatureType.ACTION}
-    input_features = {k: ft for k, ft in features.items() if k not in output_features}
 
     print(f"  Episodes: {ds_meta.total_episodes}")
     print(f"  Frames:   {ds_meta.total_frames}")
     print(f"  FPS:      {ds_meta.fps}")
-    print(f"  Input features:  {list(input_features.keys())}")
-    print(f"  Output features: {list(output_features.keys())}")
     print()
 
-    # 2. Create policy config and model
-    cfg = ACTConfig(
-        input_features=input_features,
-        output_features=output_features,
-    )
-    # Override LR if specified
-    cfg.optimizer_lr = args.lr
-    cfg.optimizer_lr_backbone = args.lr
+    # 2. Create policy config based on task
+    if args.task == "pusht":
+        cfg, PolicyClass, delta_timestamps = setup_diffusion_pusht(ds_meta, features, args)
+    else:
+        cfg, PolicyClass, delta_timestamps = setup_act(ds_meta, features, args)
 
-    # Try to resume from checkpoint
+    print(f"  Input features:  {list(cfg.input_features.keys())}")
+    print(f"  Output features: {list(cfg.output_features.keys())}")
+    print()
+
+    # 3. Try to resume from checkpoint
     start_step = 0
     last_checkpoint = output_dir / "last" / "model.safetensors"
     if args.resume and last_checkpoint.exists():
         print(f"Resuming from {output_dir / 'last'}...")
-        policy = ACTPolicy.from_pretrained(output_dir / "last", config=cfg)
-        # Load training state
+        policy = PolicyClass.from_pretrained(output_dir / "last", config=cfg)
         state_path = output_dir / "last" / "training_state.json"
         if state_path.exists():
             state = json.loads(state_path.read_text())
             start_step = state.get("step", 0)
             print(f"  Resuming from step {start_step}")
     else:
-        print("Creating ACT policy from scratch...")
-        policy = ACTPolicy(cfg)
+        print(f"Creating {task_cfg['policy_type'].upper()} policy from scratch...")
+        policy = PolicyClass(cfg)
 
     policy.train()
     policy.to(device)
@@ -118,29 +203,24 @@ def main():
     print(f"  Parameters: {n_params:,} ({n_trainable:,} trainable)")
     print()
 
-    # 3. Create pre/post processors (normalization)
-    preprocessor, postprocessor = make_pre_post_processors(cfg, dataset_stats=ds_meta.stats)
+    # 4. Create pre/post processors (normalization)
+    # For pusht state-only, build stats that include the duplicated env_state key
+    dataset_stats = ds_meta.stats
+    if args.task == "pusht":
+        dataset_stats = dict(dataset_stats)
+        dataset_stats["observation.environment_state"] = dataset_stats["observation.state"]
 
-    # 4. Set up delta timestamps for ACT
-    delta_timestamps = {
-        "action": make_delta_timestamps(cfg.action_delta_indices, ds_meta.fps),
-    }
-    # Add image features
-    delta_timestamps |= {
-        k: make_delta_timestamps(cfg.observation_delta_indices, ds_meta.fps)
-        for k in cfg.image_features
-    }
+    preprocessor, postprocessor = make_pre_post_processors(cfg, dataset_stats=dataset_stats)
 
     # 5. Load dataset
     print("Loading dataset...")
-    dataset = LeRobotDataset(args.dataset, delta_timestamps=delta_timestamps)
+    dataset = LeRobotDataset(dataset_id, delta_timestamps=delta_timestamps)
     print(f"  Loaded {len(dataset)} samples")
     print()
 
-    # 6. Create optimizer using policy preset
+    # 6. Create optimizer
     optimizer = cfg.get_optimizer_preset().build(policy.parameters())
 
-    # Resume optimizer state if available
     if args.resume and (output_dir / "last" / "optimizer.pt").exists():
         opt_state = torch.load(output_dir / "last" / "optimizer.pt", map_location=device,
                                weights_only=True)
@@ -158,6 +238,7 @@ def main():
     )
 
     # 8. Training loop
+    is_pusht = args.task == "pusht"
     print(f"Starting training from step {start_step}...")
     print("=" * 60)
 
@@ -172,10 +253,13 @@ def main():
                 done = True
                 break
 
+            # For pusht: duplicate observation.state as observation.environment_state
+            if is_pusht:
+                batch["observation.environment_state"] = batch["observation.state"].clone()
+
             batch = preprocessor(batch)
             loss, output_dict = policy.forward(batch)
             loss.backward()
-            # Gradient clipping (ACT preset uses 10.0)
             torch.nn.utils.clip_grad_norm_(policy.parameters(), max_norm=10.0)
             optimizer.step()
             optimizer.zero_grad()
@@ -183,7 +267,6 @@ def main():
             loss_val = loss.item()
             loss_history.append({"step": step, "loss": loss_val})
 
-            # Add component losses if available
             if output_dict:
                 loss_history[-1].update({
                     k: v for k, v in output_dict.items() if isinstance(v, (int, float))
@@ -232,27 +315,25 @@ def main():
     print(f"  Checkpoints:  {output_dir}")
     print(f"  Loss log:     {output_dir / 'loss_history.json'}")
     print()
-    print(f"To evaluate: python scripts/evaluate.py --checkpoint {output_dir / 'last'}")
+    print(f"To evaluate: python scripts/evaluate.py --checkpoint {output_dir / 'last'} --task {args.task}")
 
 
 def _save_checkpoint(
     output_dir: Path,
     step: int,
-    policy: ACTPolicy,
+    policy,
     preprocessor,
     postprocessor,
     optimizer,
     loss_history: list,
 ) -> None:
     """Save policy checkpoint and training state."""
-    # Save step-specific checkpoint
     step_dir = output_dir / f"step_{step:06d}"
     step_dir.mkdir(parents=True, exist_ok=True)
     policy.save_pretrained(step_dir)
     preprocessor.save_pretrained(step_dir)
     postprocessor.save_pretrained(step_dir)
 
-    # Save training state
     training_state = {"step": step}
     (step_dir / "training_state.json").write_text(json.dumps(training_state))
     torch.save(optimizer.state_dict(), step_dir / "optimizer.pt")

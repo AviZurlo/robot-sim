@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Run robot foundation models in MuJoCo simulation"
 requires-python = ">=3.10"
 dependencies = [
-    "lerobot[aloha]",
+    "lerobot[aloha,pusht]",
     "streamlit",
 ]
 

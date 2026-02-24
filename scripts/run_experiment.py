@@ -5,14 +5,14 @@ Chains together train.py, evaluate.py, and visualize.py into a single command.
 Optionally evaluates the pretrained baseline for comparison.
 
 Usage:
-    # Quick experiment (500 steps, 5 eval episodes)
-    python scripts/run_experiment.py --steps 500 --n-episodes 5 --device mps
+    # Quick PushT experiment (fast, state-only)
+    python scripts/run_experiment.py --task pusht --steps 1000 --n-episodes 5
 
-    # Full experiment (5000 steps, 10 eval episodes, with baseline comparison)
-    python scripts/run_experiment.py --steps 5000 --n-episodes 10 --device mps --baseline
+    # ALOHA experiment (slow, vision)
+    python scripts/run_experiment.py --task transfer_cube --steps 5000 --n-episodes 10 --device mps
 
-    # Resume training from checkpoint, then evaluate and plot
-    python scripts/run_experiment.py --steps 5000 --device mps --resume
+    # With pretrained baseline comparison
+    python scripts/run_experiment.py --task transfer_cube --steps 5000 --device mps --baseline
 """
 
 import argparse
@@ -20,6 +20,19 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+
+
+# Task defaults
+TASK_DEFAULTS = {
+    "transfer_cube": {
+        "output_dir": "outputs/train/act_transfer_cube",
+        "steps": 5000,
+    },
+    "pusht": {
+        "output_dir": "outputs/train/diffusion_pusht",
+        "steps": 1000,
+    },
+}
 
 
 def run_cmd(cmd: list[str], label: str) -> int:
@@ -33,13 +46,15 @@ def run_cmd(cmd: list[str], label: str) -> int:
 
 def main():
     parser = argparse.ArgumentParser(description="Run full experiment: train → evaluate → visualize")
-    parser.add_argument("--steps", type=int, default=5000, help="Training steps")
+    parser.add_argument("--task", type=str, default="transfer_cube",
+                        choices=list(TASK_DEFAULTS.keys()),
+                        help="Task: 'transfer_cube' or 'pusht'")
+    parser.add_argument("--steps", type=int, default=None, help="Training steps")
     parser.add_argument("--n-episodes", type=int, default=10, help="Evaluation episodes")
     parser.add_argument("--device", type=str, default="cpu", help="Device: cpu, mps, or cuda")
-    parser.add_argument("--batch-size", type=int, default=8, help="Training batch size")
-    parser.add_argument("--lr", type=float, default=1e-5, help="Learning rate")
-    parser.add_argument("--output-dir", type=str, default="outputs/train/act_transfer_cube",
-                        help="Training output directory")
+    parser.add_argument("--batch-size", type=int, default=None, help="Training batch size")
+    parser.add_argument("--lr", type=float, default=None, help="Learning rate")
+    parser.add_argument("--output-dir", type=str, default=None, help="Training output directory")
     parser.add_argument("--baseline", action="store_true",
                         help="Also evaluate the pretrained baseline for comparison")
     parser.add_argument("--resume", action="store_true", help="Resume training from checkpoint")
@@ -47,38 +62,47 @@ def main():
     parser.add_argument("--skip-eval", action="store_true", help="Skip evaluation, only plot")
     args = parser.parse_args()
 
+    task_cfg = TASK_DEFAULTS[args.task]
+    if args.steps is None:
+        args.steps = task_cfg["steps"]
+    if args.output_dir is None:
+        args.output_dir = task_cfg["output_dir"]
+
     t_total = time.time()
     python = sys.executable
     train_dir = args.output_dir
     checkpoint = f"{train_dir}/last"
 
     # Resolve eval output dirs
-    eval_dir = "outputs/eval/last"
+    eval_dir = f"outputs/eval/{Path(train_dir).name}"
     baseline_dir = "outputs/eval/lerobot_act_aloha_sim_transfer_cube_human"
 
     # Step 1: Train
     if not args.skip_train:
         cmd = [
             python, "scripts/train.py",
+            "--task", args.task,
             "--steps", str(args.steps),
-            "--batch-size", str(args.batch_size),
-            "--lr", str(args.lr),
             "--device", args.device,
             "--output-dir", train_dir,
         ]
+        if args.batch_size is not None:
+            cmd += ["--batch-size", str(args.batch_size)]
+        if args.lr is not None:
+            cmd += ["--lr", str(args.lr)]
         if args.resume:
             cmd.append("--resume")
-        rc = run_cmd(cmd, f"STEP 1/3: Training ACT policy ({args.steps} steps)")
+        rc = run_cmd(cmd, f"STEP 1/3: Training ({args.task}, {args.steps} steps)")
         if rc != 0:
             print(f"\nTraining failed (exit code {rc}). Aborting.")
             sys.exit(rc)
 
     # Step 2: Evaluate
     if not args.skip_eval:
-        # Evaluate trained model
         cmd = [
             python, "scripts/evaluate.py",
             "--checkpoint", checkpoint,
+            "--task", args.task,
             "--n-episodes", str(args.n_episodes),
             "--device", args.device,
             "--output-dir", eval_dir,
@@ -87,8 +111,8 @@ def main():
         if rc != 0:
             print(f"\nEvaluation failed (exit code {rc}). Continuing to plots...")
 
-        # Evaluate pretrained baseline
-        if args.baseline:
+        # Evaluate pretrained baseline (only for transfer_cube)
+        if args.baseline and args.task == "transfer_cube":
             cmd = [
                 python, "scripts/evaluate.py",
                 "--checkpoint", "lerobot/act_aloha_sim_transfer_cube_human",
