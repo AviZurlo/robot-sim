@@ -2,9 +2,9 @@
 
 Run open source robot foundation models in simulation. Train policies, watch them improve with data.
 
-## Status: Setting Up
+## Status: Simulation Running
 
-**Current phase:** Environment setup — getting LeRobot + MuJoCo simulation running.
+**Current phase:** Pretrained policy running in sim. Ready for data collection and training.
 
 ## Architecture
 
@@ -25,6 +25,7 @@ Run open source robot foundation models in simulation. Train policies, watch the
 | Date | What Changed |
 |------|-------------|
 | 2026-02-24 | Project created. LeRobot selected as framework. |
+| 2026-02-24 | LeRobot v0.4.4 + MuJoCo 3.5 + gym-aloha installed. ACT policy running in sim (100% success on cube transfer). |
 
 ## Setup
 
@@ -36,6 +37,9 @@ cd robot-sim
 
 ## What's Next
 
-- [ ] Install LeRobot + dependencies (MuJoCo, Gymnasium)
-- [ ] Run a pretrained model in simulation
-- [ ] Evaluate and document results
+- [x] Install LeRobot + dependencies (MuJoCo, Gymnasium)
+- [x] Run a pretrained model in simulation
+- [x] Evaluate and document results
+- [ ] Collect simulation data and train a custom policy
+- [ ] Try different policy architectures (Diffusion Policy, VQ-BeT)
+- [ ] Experiment with domain randomization
