@@ -1,33 +1,118 @@
 # lerobot-cache — Training Data Optimization for LeRobot
 
-**Status:** Planned (sub-project of robot-sim)
+**Status:** Research complete, ready for Phase 1 (benchmarking)
 **Created:** 2026-02-24
+**Last Updated:** 2026-02-24
 **Goal:** Open-source tool to eliminate video decoding bottleneck in LeRobot training pipelines
 
-## The Problem
+---
 
-LeRobot stores robot demonstration datasets as compressed MP4 videos. During training, every batch requires:
+## The Problem (Plain English)
 
+Imagine you have a textbook, but it's written in a secret code. Every time you want to study a page, you have to decode it first — letter by letter. And the next time you study, you decode it all over again. That's how LeRobot trains robots right now.
+
+**LeRobot stores training data as compressed MP4 videos.** These are great for saving disk space and sharing datasets online. But during training, your computer has to "unzip" every video frame on the fly — thousands of times per training run. This video decoding is slow, CPU-intensive work, and it happens over and over again even though the frames never change.
+
+**The fix is simple in concept:** decode the videos once, save the decoded frames, and load those instead. Like translating the textbook into plain English once and studying from the translation forever after. That's what lerobot-cache does.
+
+### Why This Matters (Numbers)
+
+On our Mac mini (Apple Silicon, 32GB RAM):
+- **PushT (no video):** 4.2 training steps/second ✅
+- **ALOHA ACT (with video):** Couldn't finish a single step in 20+ minutes ❌
+- **Same model complexity, same hardware.** The ONLY difference is video decoding.
+
+This isn't a Mac-specific problem — it affects anyone without a dedicated hardware video decoder chip (NVIDIA's nvdec), including AMD GPUs, cloud CPU instances, and the entire hobbyist community.
+
+### How Training Works Today (The Slow Way)
+
+Every training batch requires:
 1. Opening the MP4 file
 2. Seeking to the correct timestamp
 3. CPU-decoding compressed frames to raw pixels
 4. Converting to PyTorch tensors
 5. Feeding through the vision encoder
 
-Steps 1-3 happen **every batch, every epoch**, and are entirely CPU-bound. On hardware without NVIDIA's nvdec (Mac, AMD, CPU-only servers), video decoding becomes the dominant training bottleneck — not the actual model forward/backward pass.
+Steps 1-3 happen **every batch, every epoch**, and are entirely CPU-bound. The GPU sits idle waiting for data. It's like having a Ferrari stuck behind a horse-drawn carriage.
 
-### Evidence
+### How lerobot-cache Would Work (The Fast Way)
 
-- **Our experience:** 51M param ACT model on Mac mini couldn't complete a single training step in 20+ minutes. The model itself is fine — PushT (state-only, no video) trains at 4.2 steps/sec on the same hardware.
-- **GitHub Issue #436:** Community member asked about image storage formats for large-scale training. Marked "not planned" by LeRobot team.
-- **GitHub PR #1671:** GPU-accelerated video encoding (recording side) — confirms the team knows video I/O is a bottleneck, but only addresses the recording direction.
-- **`any4lerobot` (865★):** Community utility collection with data conversion scripts, but no transparent caching layer.
+1. **First time:** Decode all video frames once → save as ready-to-use image tensors on disk
+2. **Every subsequent training run:** Load pre-decoded tensors directly → skip video decoding entirely
+3. **Result:** Training speed is limited by your GPU/model, not your video decoder
 
-### Who is affected
+---
 
-- Anyone training vision-based policies on non-NVIDIA hardware (Mac, AMD, cloud CPU instances)
-- Anyone training on large datasets where decode time exceeds compute time
-- Hobbyists and researchers with consumer hardware (the growing LeRobot community)
+## Upstream Research Findings
+
+We dug deep into the LeRobot community to understand what others have tried and what gaps exist.
+
+### Issue #436 — "Image Storage Format" (Closed, Oct 2025)
+
+**What it was:** nikonikolov asked the LeRobot team about image storage options — comparing raw images vs compressed video for training data.
+
+**Key findings from discussion:**
+- **Cadene (LeRobot maintainer)** said PNG vs MP4 showed no quality difference for their benchmarks, and preferred video for smaller dataset sizes on Hugging Face Hub
+- **richardrl reported a ~20x speedup** using FFCV (Fast Forward Computer Vision) — a sharded binary format that stores pre-decoded images. This was on ~20TB of real-world robot data over NFS storage
+- Issue was closed as "not planned" — the team is aware of the tradeoff but chose disk-size efficiency over training speed
+
+**What this means for us:** The ~20x speedup from richardrl is real-world validation that pre-decoding works at scale. FFCV is the closest existing approach to what we're building, but it's a general computer vision tool — not tailored to LeRobot's specific dataset format or workflow.
+
+### Issue #1281 — "Large Scale Training" (Open, No Response)
+
+**What it is:** richardrl (same person who reported the FFCV speedup) followed up asking the LeRobot team directly about throughput benchmarks for large-scale training. Specifically asked about:
+- Storage requirements for Parquet (LeRobot's newer format) vs video
+- Throughput numbers for the largest datasets trained with LeRobot
+- How Parquet compares to webdataset and torchcodec (on-the-fly MP4 decoding)
+
+**Status:** No response from the LeRobot team as of Feb 2026. This tells us:
+1. The team hasn't published benchmarks for large-scale training throughput
+2. There's clear community demand for this data
+3. If we build lerobot-cache with solid benchmarks, we'd be filling an obvious gap
+
+### PR #1671 — GPU-Accelerated Async Video Encoding (Open)
+
+**What it does:** Adds NVIDIA NVENC support for faster video **recording** (i.e., when you're collecting new robot demonstration data). Claims 3-4x speedup for encoding.
+
+**Why it doesn't solve our problem:** This speeds up *saving* data, not *loading* it for training. It's like having a faster printer — helpful, but doesn't make reading faster. Also requires NVIDIA GPU, so no help on Mac/AMD.
+
+**What it tells us:** The LeRobot team and community recognize video I/O as a bottleneck. But effort has focused on the recording side, leaving the training side unaddressed.
+
+### `any4lerobot` (865★ Community Tool)
+
+**What it is:** A grab-bag of community utilities for LeRobot — data conversion scripts, format helpers, various quality-of-life tools.
+
+**What it lacks:** No transparent caching layer. No training-side optimization. Not a competitor to lerobot-cache — more like a toolbox that our tool could complement.
+
+### LeRobot's Own Format Evolution
+
+LeRobot has been evolving its data format:
+- **v1.x:** Pure MP4 video + JSON metadata
+- **v2.x:** Parquet files for tabular data (actions, states) + MP4 for images
+- The move to Parquet shows the team cares about data loading speed for non-image data, but images are still video-encoded
+
+---
+
+## How We Compare to Existing Solutions
+
+| Approach | What It Does | Training Speedup | LeRobot-Specific? | Drop-in? | Status |
+|----------|-------------|------------------|--------------------|----------|--------|
+| **LeRobot default** | Decode MP4 on every batch | Baseline (1x) | ✅ | ✅ | Current |
+| **FFCV** | Pre-decoded sharded binary format | ~20x (reported) | ❌ General CV tool | ❌ Requires rewrite | Active project |
+| **webdataset** | Sharded tar archives for distributed training | 2-5x (estimated) | ❌ General ML tool | ❌ Different format | Active project |
+| **torchcodec** | Optimized video decoding (still on-the-fly) | 1.5-2x (estimated) | ❌ General tool | ⚠️ Partial | PyTorch project |
+| **PR #1671** | GPU-accelerated recording | 0x (recording only) | ✅ | ✅ | Open PR |
+| **any4lerobot** | Data conversion utilities | 0x (no caching) | ✅ | ❌ | Community tool |
+| **Manual pre-decoding** | DIY: convert videos to images | 5-20x (depends) | ❌ Everyone reinvents it | ❌ | Common hack |
+| **lerobot-cache (ours)** | **Transparent cache + CLI + benchmarks** | **5-20x (target)** | **✅ Built for LeRobot** | **✅ Drop-in** | **Planned** |
+
+### Our Unique Value
+
+1. **LeRobot-native:** Works with LeRobot's dataset format, APIs, and training scripts — not a generic tool that requires adaptation
+2. **Drop-in replacement:** One line of code to switch from slow to fast — `CachedDataset(...)` instead of `LeRobotDataset(...)`
+3. **Benchmarked:** We'll ship with real numbers on real hardware (Mac, NVIDIA, CPU-only) — something the community is explicitly asking for (issue #1281)
+4. **CLI for non-coders:** `lerobot-cache prepare <dataset>` — hobbyists shouldn't need to write Python to make training faster
+5. **Community-facing:** Standalone PyPI package first for fast iteration, then propose upstream integration if adopted
 
 ## Proposed Solution
 
@@ -159,14 +244,7 @@ Every Mac has a dedicated video decode chip that's currently unused during train
 
 ## Competitive Landscape
 
-| Solution | What it does | Gap |
-|----------|-------------|-----|
-| LeRobot built-in `.pt` storage | Stores tensors instead of video | Not well-documented, no conversion CLI, no caching |
-| `any4lerobot` (865★) | Data conversion utilities | Grab bag, not a focused caching layer |
-| PR #1671 (GPU async encoding) | Faster video recording | Recording side only, doesn't help training |
-| NVIDIA nvdec | Hardware video decoding | NVIDIA-only, not available on Mac/AMD/CPU |
-| Manual pre-decoding | Convert videos to images yourself | Everyone reinvents this, no standard tool |
-| **lerobot-cache (ours)** | **Transparent caching + CLI + benchmarks** | **This is what we'd build** |
+*(Detailed comparison table is in the "How We Compare" section above)*
 
 ## Testing Plan (Before Shipping)
 
@@ -195,17 +273,20 @@ Every Mac has a dedicated video decode chip that's currently unused during train
 
 ## Open Questions
 
-- Should this be a standalone package (`lerobot-cache`) or a PR to LeRobot itself?
-  - Leaning standalone first (faster iteration, no review bottleneck), then upstream if adopted
-- What cache format? Safetensors (HF ecosystem), numpy mmap (fastest), or both?
-- Should we support partial caching (only cache frequently-accessed frames)?
-- Is VideoToolbox (Phase 4) worth the complexity, or is disk caching sufficient?
+- ~~Should this be a standalone package or a PR to LeRobot?~~ **Decided: Standalone first.** Faster iteration, and we can propose upstream after proving value.
+- What cache format? Safetensors (HF ecosystem), numpy mmap (fastest), or both? → **Test both in Phase 1 benchmarks**
+- Should we support partial caching (only cache frequently-accessed frames)? → Probably not for v1; full decode is simpler and disk is cheap
+- Is VideoToolbox (Phase 4) worth the complexity, or is disk caching sufficient? → **Benchmark first, decide after**
+- Should we respond to issue #1281 with our benchmark results once we have them? → Yes — this would be the perfect introduction to the community
 
 ## Resources
 
 - LeRobot dataset internals: `lerobot/common/datasets/lerobot_dataset.py`
 - LeRobot video utils: `lerobot/common/datasets/video_utils.py`
-- Issue #436: Image storage format discussion
-- `any4lerobot`: https://github.com/Tavish9/any4lerobot
+- **Issue #436:** Image storage format discussion — https://github.com/huggingface/lerobot/issues/436 (closed, "not planned")
+- **Issue #1281:** Large scale training throughput — https://github.com/huggingface/lerobot/issues/1281 (open, unanswered)
+- **PR #1671:** GPU async video encoding — https://github.com/huggingface/lerobot/pull/1671 (open, recording-side only)
+- **FFCV:** https://github.com/libffcv/ffcv — general CV data loading library (richardrl reported ~20x speedup)
+- `any4lerobot`: https://github.com/Tavish9/any4lerobot (865★ community tools)
 - Diffusion Policy paper (PushT benchmark): https://arxiv.org/abs/2303.04137
 - VideoToolbox docs: https://developer.apple.com/documentation/videotoolbox
