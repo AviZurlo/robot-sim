@@ -141,6 +141,52 @@ Access at `http://localhost:8501` or `http://<tailscale-ip>:8501`.
 | Avg Reward | 0.00 | 179.80 |
 | Training Time | 5 min | ~60+ min |
 
+## lerobot-cache
+
+Transparent caching layer that pre-decodes LeRobot MP4 video frames to safetensors files on disk. During training, frames load from cache instead of decoding video on the fly — up to 30x faster random-access reads.
+
+### Quick Start
+
+```python
+from lerobot_cache import CachedDataset
+
+# Drop-in replacement for LeRobotDataset — auto-caches on first use
+dataset = CachedDataset("lerobot/aloha_sim_transfer_cube_human")
+item = dataset[0]  # loads images from cache, not video
+```
+
+### Benchmark
+
+Dataset: `lerobot/aloha_sim_transfer_cube_human` (50 episodes, 20K frames, 480x640)
+
+| Backend | Access | ms/frame | FPS | Speedup |
+|---------|--------|----------|-----|---------|
+| Video decode | random | 2.1 | 483 | 1.0x |
+| **Safetensors** | **random** | **0.1** | **14,605** | **30.2x** |
+| NumPy mmap | random | 1.1 | 909 | 1.9x |
+
+### CLI
+
+```bash
+# Pre-decode a dataset
+lerobot-cache prepare lerobot/aloha_sim_transfer_cube_human
+
+# Run benchmark
+lerobot-cache benchmark lerobot/aloha_sim_transfer_cube_human --num-frames 500
+
+# Check cache status
+lerobot-cache info
+
+# Clear cache
+lerobot-cache clear lerobot/aloha_sim_transfer_cube_human
+```
+
+### Training with Cache
+
+```bash
+python scripts/train.py --task transfer_cube --use-cache --device mps
+```
+
 ## Architecture
 
 | | PushT (Fast) | Transfer Cube (Full) |
@@ -157,24 +203,31 @@ Access at `http://localhost:8501` or `http://<tailscale-ip>:8501`.
 
 ```
 .
+├── lerobot_cache/              # Cache layer package
+│   ├── __init__.py             # Exports CachedDataset, SafetensorsBackend
+│   ├── cached_dataset.py       # Drop-in LeRobotDataset replacement
+│   ├── cache_backend.py        # Safetensors read/write backend
+│   └── cli.py                  # CLI: prepare, benchmark, info, clear
 ├── scripts/
-│   ├── train.py            # Train policies (--task pusht or transfer_cube)
-│   ├── evaluate.py         # Evaluate trained checkpoints
-│   ├── run_experiment.py   # Chain: train → evaluate → visualize
-│   ├── visualize.py        # Generate plots from training/eval data
-│   ├── dashboard.py        # Live Streamlit monitoring dashboard
-│   ├── run_sim.py          # Run pretrained policy in sim
-│   └── start_dashboard.sh  # Launch dashboard on 0.0.0.0:8501
+│   ├── train.py                # Train policies (--task, --use-cache)
+│   ├── evaluate.py             # Evaluate trained checkpoints
+│   ├── benchmark_decode.py     # Benchmark video decode vs cached loading
+│   ├── predecode_dataset.py    # Pre-decode dataset to safetensors cache
+│   ├── run_experiment.py       # Chain: train → evaluate → visualize
+│   ├── visualize.py            # Generate plots from training/eval data
+│   ├── dashboard.py            # Live Streamlit monitoring dashboard
+│   ├── run_sim.py              # Run pretrained policy in sim
+│   └── start_dashboard.sh      # Launch dashboard on 0.0.0.0:8501
+├── tests/
+│   └── test_cache.py           # Cache backend and integration tests
 ├── .streamlit/
-│   └── config.toml          # Streamlit dark theme config
+│   └── config.toml             # Streamlit dark theme config
 ├── outputs/
-│   ├── plots/               # Visualization PNGs (tracked in git)
-│   ├── train/               # Training checkpoints and loss logs (git-ignored)
-│   │   ├── diffusion_pusht/     # PushT training outputs
-│   │   └── act_transfer_cube/   # ALOHA training outputs
-│   ├── eval/                # Evaluation videos and metrics (git-ignored)
-│   └── videos/              # Pretrained policy videos (git-ignored)
-├── PROJECT.md               # Project roadmap and log
-├── pyproject.toml           # Python project metadata
+│   ├── plots/                  # Visualization PNGs (tracked in git)
+│   ├── train/                  # Training checkpoints (git-ignored)
+│   ├── eval/                   # Evaluation results (git-ignored)
+│   └── videos/                 # Simulation videos (git-ignored)
+├── PROJECT.md                  # Project roadmap and log
+├── pyproject.toml              # Python project metadata
 └── README.md
 ```

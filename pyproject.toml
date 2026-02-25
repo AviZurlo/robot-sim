@@ -11,4 +11,8 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "ruff",
+    "pytest",
 ]
+
+[project.scripts]
+lerobot-cache = "lerobot_cache.cli:main"
