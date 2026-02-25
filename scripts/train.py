@@ -127,13 +127,14 @@ def main():
     parser.add_argument("--steps", type=int, default=None, help="Total training steps")
     parser.add_argument("--batch-size", type=int, default=None, help="Training batch size")
     parser.add_argument("--lr", type=float, default=None, help="Learning rate")
-    parser.add_argument("--device", type=str, default="cpu", help="Device: cpu, mps, or cuda")
+    parser.add_argument("--device", type=str, default="mps", help="Device: cpu, mps, or cuda")
     parser.add_argument("--output-dir", type=str, default=None, help="Directory to save checkpoints")
     parser.add_argument("--log-freq", type=int, default=50, help="Log every N steps")
     parser.add_argument("--save-freq", type=int, default=1000, help="Save checkpoint every N steps")
     parser.add_argument("--num-workers", type=int, default=4, help="DataLoader workers")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument("--resume", action="store_true", help="Resume from last checkpoint")
+    parser.add_argument("--compile", action="store_true", help="Use torch.compile() for faster training")
     parser.add_argument("--use-cache", action="store_true",
                         help="Use lerobot-cache for faster frame loading (pre-decodes video to safetensors)")
     parser.add_argument("--cache-dir", type=str, default=None,
@@ -203,8 +204,16 @@ def main():
 
     policy.train()
     policy.to(device)
-    n_params = sum(p.numel() for p in policy.parameters())
-    n_trainable = sum(p.numel() for p in policy.parameters() if p.requires_grad)
+
+    if args.compile:
+        if device.type == "mps":
+            print("  WARNING: torch.compile() not supported on MPS (missing ops + Metal buffer limits). Skipping.")
+        else:
+            print("  Compiling model with torch.compile()...")
+            policy = torch.compile(policy)
+
+    n_params = sum(p.numel() for p in (policy.parameters() if not args.compile else policy._orig_mod.parameters()))
+    n_trainable = sum(p.numel() for p in (policy.parameters() if not args.compile else policy._orig_mod.parameters()) if p.requires_grad)
     print(f"  Parameters: {n_params:,} ({n_trainable:,} trainable)")
     print()
 
