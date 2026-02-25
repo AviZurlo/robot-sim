@@ -63,6 +63,7 @@ def setup_act(ds_meta, features, args):
     input_features = {k: ft for k, ft in features.items() if k not in output_features}
 
     cfg = ACTConfig(input_features=input_features, output_features=output_features)
+    cfg.device = args.device  # Override auto-detected device
     cfg.optimizer_lr = args.lr
     cfg.optimizer_lr_backbone = args.lr
 
