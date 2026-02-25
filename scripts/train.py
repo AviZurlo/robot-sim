@@ -133,6 +133,10 @@ def main():
     parser.add_argument("--num-workers", type=int, default=4, help="DataLoader workers")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument("--resume", action="store_true", help="Resume from last checkpoint")
+    parser.add_argument("--use-cache", action="store_true",
+                        help="Use lerobot-cache for faster frame loading (pre-decodes video to safetensors)")
+    parser.add_argument("--cache-dir", type=str, default=None,
+                        help="Cache directory (default: ~/.cache/lerobot-cache/<dataset>)")
     args = parser.parse_args()
 
     # Apply task defaults for unset args
@@ -214,7 +218,20 @@ def main():
 
     # 5. Load dataset
     print("Loading dataset...")
-    dataset = LeRobotDataset(dataset_id, delta_timestamps=delta_timestamps)
+    if args.use_cache:
+        from lerobot_cache import CachedDataset
+        dataset = CachedDataset(
+            dataset_id,
+            cache_dir=args.cache_dir,
+            auto_cache=True,
+            delta_timestamps=delta_timestamps,
+        )
+        info = dataset.cache_info()
+        print(f"  Cache: {info['cache_dir']}")
+        print(f"  Cached frames: {info['cached_frames']}")
+        print(f"  Disk: {info.get('disk_size_gb', 0):.2f} GB" if 'disk_size_gb' in info else "")
+    else:
+        dataset = LeRobotDataset(dataset_id, delta_timestamps=delta_timestamps)
     print(f"  Loaded {len(dataset)} samples")
     print()
 
