@@ -36,7 +36,7 @@ def cmd_prepare(args: argparse.Namespace) -> None:
     meta = LeRobotDatasetMetadata(repo_id)
     image_keys = [
         key for key, feat in meta.features.items()
-        if feat.get("dtype", "") == "image"
+        if feat.get("dtype", "") in ("image", "video")
     ]
 
     if not image_keys:

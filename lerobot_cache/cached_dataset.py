@@ -50,10 +50,11 @@ class CachedDataset(torch.utils.data.Dataset):
             cache_dir = Path.home() / ".cache" / "lerobot-cache" / _sanitize_repo_id(repo_id)
         self.cache_dir = Path(cache_dir)
 
-        # Identify image keys from dataset features
+        # Identify image/video keys from dataset features
+        # LeRobot uses dtype "video" for video-sourced image features
         self.image_keys = [
             key for key, feat in self.meta.features.items()
-            if feat.get("dtype", "") == "image"
+            if feat.get("dtype", "") in ("image", "video")
         ]
 
         self.backend = SafetensorsBackend(self.cache_dir)

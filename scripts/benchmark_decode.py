@@ -28,7 +28,7 @@ from lerobot.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetad
 
 
 def _get_image_keys(meta: LeRobotDatasetMetadata) -> list[str]:
-    return [k for k, v in meta.features.items() if v.get("dtype", "") == "image"]
+    return [k for k, v in meta.features.items() if v.get("dtype", "") in ("image", "video")]
 
 
 def benchmark_video_sequential(dataset: LeRobotDataset, image_key: str, indices: list[int]) -> float:
