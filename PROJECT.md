@@ -30,6 +30,7 @@ Run open source robot foundation models in simulation. Train policies, watch the
 | 2026-02-24 | Results dashboard: visualize.py + run_experiment.py. 500-step training run: loss 101→2.7, 0% success (vs 80% pretrained baseline). Plots in `outputs/plots/`. |
 | 2026-02-24 | Live Streamlit dashboard: scripts/dashboard.py. Auto-refreshing loss curves, eval results + videos, experiment history, baseline comparison, status page. Accessible via Tailscale on 0.0.0.0:8501. |
 | 2026-02-24 | Fast training mode: PushT task with Diffusion Policy (4.4M params, state-only, no video). Trains 1000 steps in ~4.5 min on CPU. `--task pusht` flag on train.py, evaluate.py, run_experiment.py. Dashboard updated for multi-task support. |
+| 2026-02-25 | MPS benchmarked: 2.2x speedup over CPU for ACT (0.5 → 1.1 steps/sec). MPS now default device. Added `--compile` flag (CUDA only — MPS blocked by Metal buffer limits + missing `aten::native_dropout`). |
 
 ## Training Configurations
 
@@ -51,7 +52,7 @@ Run open source robot foundation models in simulation. Train policies, watch the
 - **Actions:** 14-DOF continuous (chunk size 100)
 - **Optimizer:** AdamW, lr=1e-5, weight_decay=1e-4, grad_clip=10.0
 - **Loss:** L1 action prediction + KL divergence (VAE, weight=10.0)
-- **Training speed:** ~1.4 steps/s on MPS (Apple Silicon), ~60 min for 5000 steps
+- **Training speed:** ~1.1 steps/s on MPS (Apple Silicon), ~0.5 steps/s on CPU. MPS is default device.
 
 ## Experiment Results
 
@@ -75,6 +76,31 @@ Run open source robot foundation models in simulation. Train policies, watch the
 | Avg Reward | 0.00 | 179.80 |
 | Training Time | 5.2 min | — |
 
+## Performance Optimization Log
+
+### MPS (Apple Silicon GPU) — 2026-02-25
+- **Result:** 2.2x speedup over CPU (0.5 → 1.1 steps/sec) for ACT transfer_cube
+- **Change:** `--device mps` now default in train.py
+- **Method:** PyTorch MPS backend — offloads matrix math to Apple Silicon GPU
+- **Cost:** Free (built into hardware)
+
+### torch.compile() — 2026-02-25
+- **Result:** Not viable on MPS
+- **Blocker 1:** `inductor` backend — Metal shader compiler exceeds buffer slot limits (31+ out_ptrs)
+- **Blocker 2:** `aot_eager` backend — `aten::native_dropout` not implemented for MPS. With CPU fallback (`PYTORCH_ENABLE_MPS_FALLBACK=1`), drops to 0.2 steps/s (5x slower than MPS alone)
+- **Status:** `--compile` flag added but auto-skips on MPS. Available for CUDA.
+
+### lerobot-cache (frame pre-decoding) — 2026-02-24
+- **Result:** 26-30x faster random frame access (video decode → safetensors)
+- **Impact on training:** Minimal at current scale (data loading is <2% of step time). Becomes significant with GPU, multi-worker, larger batches.
+- **Trade-off:** ~69GB disk for 20K frames
+
+### Optimization Priority (not yet tried)
+1. **Cloud GPU (Modal/Lambda A100)** — estimated 20-40x over CPU (~$1-2/hr)
+2. **Mixed precision (float16/bfloat16)** — estimated 1.5-2x on supported hardware
+3. **Freeze vision backbone** — reduce backward pass by skipping CNN gradients
+4. **Reduce image resolution** — smaller input = faster forward through ResNet
+
 ## What's Next
 
 - [x] Install LeRobot + dependencies (MuJoCo, Gymnasium)
@@ -85,6 +111,10 @@ Run open source robot foundation models in simulation. Train policies, watch the
 - [x] Build results visualization dashboard
 - [x] Live Streamlit training dashboard (network-accessible via Tailscale)
 - [x] Fast state-based training with PushT + Diffusion Policy
+- [x] Benchmark MPS vs CPU, make MPS default
+- [x] Test torch.compile() (blocked on MPS, available for CUDA)
 - [ ] Train PushT for more steps (10k+) to achieve task success
 - [ ] Train ALOHA for more steps (50k-100k) to match pretrained performance
+- [ ] Try mixed precision training (float16/bfloat16)
+- [ ] Try cloud GPU (Modal/Lambda) for 20-40x speedup
 - [ ] Experiment with domain randomization

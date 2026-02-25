@@ -83,11 +83,12 @@ Videos are saved to `outputs/videos/`.
 | `--steps` | task-dependent | Total training steps (pusht: 1000, transfer_cube: 5000) |
 | `--batch-size` | task-dependent | Batch size (pusht: 64, transfer_cube: 8) |
 | `--lr` | task-dependent | Learning rate (pusht: 1e-4, transfer_cube: 1e-5) |
-| `--device` | `cpu` | Compute device: `cpu`, `mps`, or `cuda` |
+| `--device` | `mps` | Compute device: `cpu`, `mps`, or `cuda` |
 | `--output-dir` | task-dependent | Checkpoint directory |
 | `--log-freq` | `50` | Log every N steps |
 | `--save-freq` | `1000` | Save checkpoint every N steps |
 | `--resume` | - | Resume from last checkpoint |
+| `--compile` | - | Use torch.compile() (CUDA only; auto-skips on MPS) |
 
 ## Evaluation Options
 
@@ -116,6 +117,29 @@ Access at `http://localhost:8501` or `http://<tailscale-ip>:8501`.
 | **Experiment History** | Training checkpoints and evaluation runs for all tasks |
 | **Baseline Comparison** | Side-by-side metrics comparison |
 | **Status** | Per-task training status, checkpoints, disk usage |
+
+## Performance Benchmarks
+
+### Device Comparison — ACT Transfer Cube (51M params, batch=8)
+
+| Device | Steps/sec | Relative | Notes |
+|--------|-----------|----------|-------|
+| CPU (M-series) | 0.5 | 1.0x | Baseline |
+| **MPS (Apple Silicon GPU)** | **1.1** | **2.2x** | Default device |
+| MPS + torch.compile | ❌ | — | Not supported (Metal buffer limits + missing ops) |
+| CPU + torch.compile | TBD | — | Available via `--compile` flag |
+| CUDA (A100) | ~10-20 | ~20-40x | Estimated, not tested |
+
+**Key findings:**
+- MPS provides a free 2.2x speedup on Apple Silicon with zero code changes
+- `torch.compile()` on MPS hits two blockers: Metal shader compiler runs out of buffer slots (inductor backend), and `aten::native_dropout` is not implemented (aot_eager backend falls back to CPU, making it 5x slower)
+- `torch.compile()` with inductor backend is available for CUDA GPUs via `--compile`
+
+### Device Comparison — Diffusion PushT (4.4M params, batch=64)
+
+| Device | Steps/sec | Notes |
+|--------|-----------|-------|
+| CPU | ~4.5 | State-only, no vision — CPU-bound is fine |
 
 ## Results
 
@@ -197,7 +221,7 @@ python scripts/train.py --task transfer_cube --use-cache --device mps
 | **Actions** | 2D continuous | 14-DOF continuous |
 | **Dataset** | `lerobot/pusht` (206 demos) | `lerobot/aloha_sim_transfer_cube_human` (50 demos) |
 | **Environment** | PushT-v0 (PyGame) | AlohaTransferCube-v0 (MuJoCo) |
-| **Training Speed** | ~4.5 steps/s (CPU) | ~1.4 steps/s (MPS) |
+| **Training Speed** | ~4.5 steps/s (CPU) | ~1.1 steps/s (MPS) |
 
 ## Project Structure
 
