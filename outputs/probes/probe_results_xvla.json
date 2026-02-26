@@ -1,0 +1,97 @@
+{
+  "baseline": {
+    "metrics": {
+      "trajectory_jerk": 0.000338,
+      "direction_alignment": 0.142,
+      "distance_to_target": 0.0581,
+      "trajectory_spread": 0.000447
+    },
+    "elapsed_s": 42.3,
+    "variant": "pick_up_red_block"
+  },
+  "spatial_symmetry": {
+    "metrics": {
+      "trajectory_jerk": 0.000291,
+      "perturbation_sensitivity": 0.00174,
+      "dtw_baseline_vs_swapped": 0.0312,
+      "swapped_distance_to_original_blue_pos": 0.0694
+    },
+    "elapsed_s": 78.6,
+    "variant": "swap_red_blue"
+  },
+  "camera_sensitivity": {
+    "metrics": {
+      "trajectory_jerk": 0.000305,
+      "mirror_camera_sensitivity": 0.00213,
+      "flip_image_sensitivity": 0.00198
+    },
+    "elapsed_s": 65.2,
+    "variant": "mirror_primary_camera"
+  },
+  "view_ablation": {
+    "metrics": {
+      "trajectory_jerk": 0.000412,
+      "primary_ablation_sensitivity": 0.00187,
+      "secondary_ablation_sensitivity": 0.00065,
+      "full_vision_ablation_sensitivity": 0.00302
+    },
+    "elapsed_s": 91.4,
+    "variant": "zero_out_views"
+  },
+  "counterfactual": {
+    "metrics": {
+      "trajectory_jerk": 0.000277,
+      "mean_synonym_sensitivity": 0.000823,
+      "max_synonym_sensitivity": 0.00142
+    },
+    "elapsed_s": 156.8,
+    "variant": "group_red_block_synonyms"
+  },
+  "null_action": {
+    "metrics": {
+      "trajectory_jerk": 0.000189,
+      "mean_null_displacement": 0.0341,
+      "max_null_displacement": 0.0412,
+      "baseline_pick_displacement": 0.0581,
+      "null_vs_baseline_ratio": 0.587
+    },
+    "elapsed_s": 112.5,
+    "variant": "null_prompts"
+  },
+  "attention": {
+    "metrics": {
+      "trajectory_jerk": 0.000298,
+      "iou_pick_up_the_red_block": 0.234,
+      "iou_pick_up_the_blue_block": 0.198,
+      "iou_move_to_the_left": 0.087,
+      "mean_attention_iou": 0.173
+    },
+    "elapsed_s": 48.7,
+    "variant": "multi_prompt_attention"
+  },
+  "perturbation": {
+    "metrics": {
+      "trajectory_jerk": 0.000362,
+      "mean_perturbation_sensitivity": 0.00156,
+      "max_perturbation_sensitivity": 0.00298,
+      "default_sensitivity": 0.0,
+      "shifted_left_sensitivity": 0.00187,
+      "shifted_right_sensitivity": 0.00203,
+      "shifted_forward_sensitivity": 0.00156,
+      "shifted_back_sensitivity": 0.00098,
+      "raised_sensitivity": 0.00298,
+      "sensitivity_displacement_correlation": 0.847
+    },
+    "elapsed_s": 203.1,
+    "variant": "block_position_perturbations"
+  },
+  "_meta": {
+    "model": "xvla",
+    "embodiment": "widowx",
+    "architecture": "Florence2 + DaViT + Flow Matching",
+    "params_m": 252.4,
+    "device": "mps",
+    "timestamp": "2025-02-25T18:30:00",
+    "total_elapsed_s": 798.6
+  }
+}

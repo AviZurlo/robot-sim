@@ -118,6 +118,29 @@ Access at `http://localhost:8501` or `http://<tailscale-ip>:8501`.
 | **Baseline Comparison** | Side-by-side metrics comparison |
 | **Status** | Per-task training status, checkpoints, disk usage |
 
+## VLA Probing Dashboard
+
+Interactive Streamlit dashboard for viewing and comparing VLA diagnostic probe results across models.
+
+```bash
+bash scripts/start_probe_dashboard.sh
+```
+
+Access at `http://localhost:8502` or `http://<tailscale-ip>:8502`.
+
+| Page | What it shows |
+|------|--------------|
+| **Overview** | Summary heatmap (model × probe), radar chart, model metadata |
+| **Per-Probe Details** | Detailed metrics for each of the 8 probes, side-by-side comparison |
+| **Metrics Explorer** | Scatter plots, distributions, filterable metric table |
+| **Attention Maps** | Attention overlay images and IoU metrics |
+
+Reads results from `outputs/probes/probe_results_<model>.json`. Generate results with:
+
+```bash
+python -m vla_probing --model xvla --device mps
+```
+
 ## Performance Benchmarks
 
 ### Device Comparison — ACT Transfer Cube (51M params, batch=8)
@@ -241,13 +264,19 @@ python scripts/train.py --task transfer_cube --use-cache --device mps
 │   ├── visualize.py            # Generate plots from training/eval data
 │   ├── dashboard.py            # Live Streamlit monitoring dashboard
 │   ├── run_sim.py              # Run pretrained policy in sim
-│   └── start_dashboard.sh      # Launch dashboard on 0.0.0.0:8501
+│   ├── start_dashboard.sh      # Launch training dashboard on 0.0.0.0:8501
+│   └── start_probe_dashboard.sh # Launch probing dashboard on 0.0.0.0:8502
 ├── tests/
 │   └── test_cache.py           # Cache backend and integration tests
+├── vla_probing/
+│   ├── dashboard.py            # Probing results Streamlit dashboard
+│   ├── run_all.py              # Run all 8 diagnostic probes
+│   └── probes/                 # Probe implementations (8 probes)
 ├── .streamlit/
 │   └── config.toml             # Streamlit dark theme config
 ├── outputs/
 │   ├── plots/                  # Visualization PNGs (tracked in git)
+│   ├── probes/                 # VLA probe results JSON (git-ignored)
 │   ├── train/                  # Training checkpoints (git-ignored)
 │   ├── eval/                   # Evaluation results (git-ignored)
 │   └── videos/                 # Simulation videos (git-ignored)
