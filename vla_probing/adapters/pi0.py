@@ -121,10 +121,30 @@ class Pi0Adapter(VLAAdapter):
         if feat is not None:
             self._action_dim = feat.shape[0]
 
-        # Load PaliGemma tokenizer
+        # Load tokenizer compatible with PaliGemma's Gemma vocabulary.
+        # PaliGemma (google/paligemma-3b-pt-224) is gated, so we fall back
+        # to unsloth/gemma-2b which shares the same 256K sentencepiece vocab.
+        # PaliGemma has 257152 tokens (256000 text + 1152 image), but text
+        # tokenization is identical.
         from transformers import AutoTokenizer
 
-        self._tokenizer = AutoTokenizer.from_pretrained("google/paligemma-3b-pt-224")
+        for tokenizer_name in [
+            "google/paligemma-3b-pt-224",
+            "unsloth/gemma-2b",
+        ]:
+            try:
+                self._tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+                self._tokenizer.padding_side = "right"
+                print(f"  tokenizer: {tokenizer_name} (vocab={self._tokenizer.vocab_size})")
+                break
+            except OSError:
+                continue
+        else:
+            raise RuntimeError(
+                "Could not load a Gemma-compatible tokenizer. "
+                "Either log in to HF (`huggingface-cli login`) for PaliGemma access, "
+                "or ensure `unsloth/gemma-2b` is reachable."
+            )
 
         n_params = sum(p.numel() for p in self.policy.parameters()) / 1e6
         print(f"π0 loaded: {n_params:.1f}M params on {self.device}")

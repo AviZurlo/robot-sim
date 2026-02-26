@@ -36,7 +36,6 @@ def _check_mps_memory(required_gb: float = 14.0) -> bool:
     if not torch.backends.mps.is_available():
         return False
     try:
-        # Apple Silicon total memory check via platform
         import subprocess
 
         result = subprocess.run(
@@ -114,6 +113,8 @@ class OpenVLAAdapter(VLAAdapter):
         )
 
         # Load model in fp16 — bfloat16 not fully supported on MPS
+        # Use attn_implementation="eager" — the custom model code predates
+        # SDPA support checks in newer transformers versions
         model_dtype = torch.float16
         try:
             self.model = AutoModelForVision2Seq.from_pretrained(
@@ -121,11 +122,12 @@ class OpenVLAAdapter(VLAAdapter):
                 torch_dtype=model_dtype,
                 low_cpu_mem_usage=True,
                 trust_remote_code=True,
+                attn_implementation="eager",
             )
             self.model.to(self.device)
             self.model.eval()
-        except (RuntimeError, torch.mps.OutOfMemoryError) if hasattr(torch, "mps") else RuntimeError as e:
-            if self.device.type == "mps":
+        except RuntimeError as e:
+            if self.device.type == "mps" and "out of memory" in str(e).lower():
                 print(f"MPS OOM ({e}), falling back to CPU...")
                 self.device = torch.device("cpu")
                 self.model = AutoModelForVision2Seq.from_pretrained(
@@ -133,6 +135,7 @@ class OpenVLAAdapter(VLAAdapter):
                     torch_dtype=torch.float32,  # CPU works better with fp32
                     low_cpu_mem_usage=True,
                     trust_remote_code=True,
+                    attn_implementation="eager",
                 )
                 self.model.to(self.device)
                 self.model.eval()
