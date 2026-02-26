@@ -13,6 +13,15 @@ dev = [
     "ruff",
     "pytest",
 ]
+vla-probing = [
+    "lerobot[xvla]",
+    "captum",
+    "plotly",
+    "wandb",
+    "dtw-python",
+    "scipy",
+    "kaleido",
+]
 
 [project.scripts]
 lerobot-cache = "lerobot_cache.cli:main"
