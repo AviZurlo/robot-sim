@@ -5,6 +5,8 @@ description = "Run robot foundation models in MuJoCo simulation"
 requires-python = ">=3.10"
 dependencies = [
     "lerobot[aloha,pusht]",
+    "matplotlib>=3.10.8",
+    "pillow>=12.1.1",
     "plotly>=6.5.2",
     "streamlit",
 ]
@@ -22,6 +24,9 @@ vla-probing = [
     "dtw-python",
     "scipy",
     "kaleido",
+]
+pi0 = [
+    "scipy>=1.10.1,<1.15",
 ]
 openvla = [
     "transformers>=4.40.0",

@@ -116,6 +116,13 @@ class Pi0Adapter(VLAAdapter):
         # Force eager attention on MPS (no flash_attn support)
         self._force_eager_attention()
 
+        # Patch denoise_step to clone KV cache before each step.
+        # Stock transformers' GemmaAttention.forward() mutates the
+        # DynamicCache even when use_cache=False, causing the cache to
+        # grow across denoising iterations. The custom transformers fork
+        # (fix/lerobot_openpi) patches this, but we work around it here.
+        self._patch_denoise_step()
+
         # Cache action dim from config
         feat = self.policy.config.action_feature
         if feat is not None:
@@ -149,6 +156,30 @@ class Pi0Adapter(VLAAdapter):
         n_params = sum(p.numel() for p in self.policy.parameters()) / 1e6
         print(f"π0 loaded: {n_params:.1f}M params on {self.device}")
         print(f"  action_dim={self.action_dim}, chunk_size={self.chunk_size}")
+
+    def _patch_denoise_step(self) -> None:
+        """Patch PI0Pytorch.denoise_step to clone KV cache before use.
+
+        Stock transformers' DynamicCache is mutated by GemmaAttention.forward
+        even when use_cache=False. This causes the cache to grow across
+        denoising steps (816 → 867 → 918 → ...), leading to dimension
+        mismatches. We wrap denoise_step to deep-copy the cache each time.
+        """
+        import copy
+
+        original_denoise = self.policy.model.denoise_step
+
+        def patched_denoise(state, prefix_pad_masks, past_key_values, x_t, timestep):
+            kv_copy = copy.deepcopy(past_key_values)
+            return original_denoise(
+                state=state,
+                prefix_pad_masks=prefix_pad_masks,
+                past_key_values=kv_copy,
+                x_t=x_t,
+                timestep=timestep,
+            )
+
+        self.policy.model.denoise_step = patched_denoise
 
     def _force_eager_attention(self) -> None:
         """Force eager attention implementation (no flash_attn on MPS)."""
@@ -202,7 +233,7 @@ class Pi0Adapter(VLAAdapter):
             "observation.images.image2": imgs[1],
             "observation.state": state,
             "observation.language.tokens": tokens["input_ids"].to(self.device),
-            "observation.language.attention_mask": tokens["attention_mask"].to(self.device),
+            "observation.language.attention_mask": tokens["attention_mask"].bool().to(self.device),
         }
 
     def predict_action(self, inp: VLAInput) -> VLAOutput:
@@ -228,81 +259,64 @@ class Pi0Adapter(VLAAdapter):
     def get_attention(self, inp: VLAInput) -> dict[str, np.ndarray]:
         """Extract attention maps from π0's PaliGemma VLM backbone.
 
-        Hooks into the PaliGemma language model layers to capture
-        self-attention weights during the prefix forward pass
-        (image embeddings + language tokens).
+        Hooks into GemmaAttention.forward() to capture self-attention
+        weights during the prefix forward pass (image + language tokens).
 
-        π0's inference does a prefix-only forward with use_cache=True
-        to get KV cache, then iterative denoising with the action expert.
-        We capture attention from the prefix pass where vision and
-        language tokens interact.
+        GemmaDecoderLayer discards attention weights, so we register
+        forward hooks on each layer's self_attn module to intercept them.
         """
         batch = self._prepare_batch(inp)
         attn_weights_captured: list[torch.Tensor] = []
 
-        # Hook into PaliGemma language model self-attention
         pali_lm = self.policy.model.paligemma_with_expert.paligemma.language_model
 
+        # Force eager attention — required for attention weight output
+        pali_lm.config._attn_implementation = "eager"
+
+        # Hook into each GemmaAttention module to capture weights.
+        # GemmaAttention.forward() returns (attn_output, attn_weights),
+        # but GemmaDecoderLayer discards attn_weights with `_`.
         hooks = []
         for layer in pali_lm.layers:
             def make_hook():
                 def hook_fn(module, args, kwargs, output):
-                    # GemmaDecoderLayer returns (hidden_states, self_attn_weights, ...)
-                    # When output_attentions=True (which we set below), the
-                    # self_attn module captures weights. But since Pi0 uses
-                    # custom forward, we use a different approach below.
-                    pass
+                    # output = (attn_output, attn_weights)
+                    if isinstance(output, tuple) and len(output) > 1 and output[1] is not None:
+                        attn_weights_captured.append(output[1].detach().cpu())
                 return hook_fn
-            h = layer.register_forward_hook(make_hook(), with_kwargs=True)
+            h = layer.self_attn.register_forward_hook(make_hook(), with_kwargs=True)
             hooks.append(h)
 
-        # Remove placeholder hooks — use direct approach instead
-        for h in hooks:
-            h.remove()
+        try:
+            with torch.no_grad():
+                self.policy.reset()
 
-        # Direct approach: run embed_prefix to get image + language embeddings,
-        # then forward through PaliGemma with output_attentions=True.
-        with torch.no_grad():
-            self.policy.reset()
+                images, img_masks = self.policy._preprocess_images(batch)
+                lang_tokens = batch["observation.language.tokens"]
+                lang_masks = batch["observation.language.attention_mask"]
 
-            # Get preprocessed images and state
-            images, img_masks = self.policy._preprocess_images(batch)
-            lang_tokens = batch["observation.language.tokens"]
-            lang_masks = batch["observation.language.attention_mask"]
+                from lerobot.policies.pi0.modeling_pi0 import make_att_2d_masks
 
-            # Embed prefix (images + language)
-            from lerobot.policies.pi0.modeling_pi0 import make_att_2d_masks
-
-            prefix_embs, prefix_pad_masks, prefix_att_masks = (
-                self.policy.model.embed_prefix(
-                    images, img_masks, lang_tokens, lang_masks
+                prefix_embs, prefix_pad_masks, prefix_att_masks = (
+                    self.policy.model.embed_prefix(
+                        images, img_masks, lang_tokens, lang_masks
+                    )
                 )
-            )
 
-            prefix_att_2d_masks = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
-            prefix_position_ids = torch.cumsum(prefix_pad_masks, dim=1) - 1
+                prefix_att_2d_masks = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
+                prefix_position_ids = torch.cumsum(prefix_pad_masks, dim=1) - 1
+                att_2d_masks_4d = self.policy.model._prepare_attention_masks_4d(prefix_att_2d_masks)
 
-            # Prepare 4D attention mask
-            att_2d_masks_4d = self.policy.model._prepare_attention_masks_4d(prefix_att_2d_masks)
-
-            # Force eager attention for output_attentions support
-            pali_lm.config._attn_implementation = "eager"
-
-            # Run through PaliGemma language model layers manually to capture attention
-            hidden_states = prefix_embs
-
-            # PaliGemma's language model has normalizer embeddings scaling
-            # that was already applied in embed_prefix, so we go layer-by-layer
-            for layer in pali_lm.layers:
-                layer_output = layer(
-                    hidden_states,
+                # Forward through GemmaModel — handles RoPE and normalizer internally
+                pali_lm(
+                    inputs_embeds=prefix_embs,
                     attention_mask=att_2d_masks_4d,
                     position_ids=prefix_position_ids,
                     output_attentions=True,
                 )
-                hidden_states = layer_output[0]
-                if len(layer_output) > 1 and layer_output[1] is not None:
-                    attn_weights_captured.append(layer_output[1].detach().cpu())
+        finally:
+            for h in hooks:
+                h.remove()
 
         if not attn_weights_captured:
             return self._fallback_attention()
