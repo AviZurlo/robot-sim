@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 
 from vla_probing.adapter import VLAAdapter, VLAInput, XVLAAdapter
+from vla_probing.adapters.smolvla import SmolVLAAdapter
 from vla_probing.metrics import compute_all_metrics
 from vla_probing.scene import WidowXScene
 from vla_probing.tracking import ExperimentTracker, ProbeResult
@@ -110,6 +111,7 @@ def make_adapter(model: str = "xvla", device: str = "mps") -> VLAAdapter:
     """Factory to create a VLA adapter by model name."""
     adapters = {
         "xvla": XVLAAdapter,
+        "smolvla": SmolVLAAdapter,
     }
     if model not in adapters:
         raise ValueError(f"Unknown model: {model}. Available: {list(adapters.keys())}")
@@ -122,7 +124,7 @@ def common_args(description: str) -> argparse.ArgumentParser:
     """Create argument parser with common probe arguments."""
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument(
-        "--model", default="xvla", choices=["xvla"], help="VLA model to probe"
+        "--model", default="xvla", choices=["xvla", "smolvla"], help="VLA model to probe"
     )
     parser.add_argument(
         "--device", default="mps", choices=["mps", "cpu", "cuda"], help="Device"

@@ -14,7 +14,7 @@ dev = [
     "pytest",
 ]
 vla-probing = [
-    "lerobot[xvla]",
+    "lerobot[xvla,smolvla]",
     "captum",
     "plotly",
     "wandb",
