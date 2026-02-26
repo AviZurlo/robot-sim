@@ -24,7 +24,7 @@ vla-probing = [
 ]
 openvla = [
     "transformers>=4.40.0",
-    "timm",
+    "timm>=0.9.10,<1.0.0",
     "tokenizers",
     "Pillow",
     "scipy",

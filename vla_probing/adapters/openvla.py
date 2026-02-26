@@ -113,6 +113,8 @@ class OpenVLAAdapter(VLAAdapter):
         )
 
         # Load model in fp16 — bfloat16 not fully supported on MPS
+        # Use attn_implementation="eager" — the custom model code predates
+        # SDPA support checks in newer transformers versions
         model_dtype = torch.float16
         try:
             self.model = AutoModelForVision2Seq.from_pretrained(
@@ -120,6 +122,7 @@ class OpenVLAAdapter(VLAAdapter):
                 torch_dtype=model_dtype,
                 low_cpu_mem_usage=True,
                 trust_remote_code=True,
+                attn_implementation="eager",
             )
             self.model.to(self.device)
             self.model.eval()
@@ -132,6 +135,7 @@ class OpenVLAAdapter(VLAAdapter):
                     torch_dtype=torch.float32,  # CPU works better with fp32
                     low_cpu_mem_usage=True,
                     trust_remote_code=True,
+                    attn_implementation="eager",
                 )
                 self.model.to(self.device)
                 self.model.eval()
