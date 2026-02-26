@@ -101,6 +101,7 @@ MODEL_COLORS = {
     "xvla": "#636EFA",
     "pi0": "#EF553B",
     "openvla": "#AB63FA",
+    "openvla_oft": "#00CC96",
 }
 
 # Scene suffixes get a lighter shade
@@ -113,6 +114,7 @@ MODEL_DISPLAY = {
     "xvla": "X-VLA",
     "pi0": "Pi0",
     "openvla": "OpenVLA",
+    "openvla_oft": "OpenVLA-OFT",
 }
 
 SCENE_DISPLAY = {
