@@ -1,99 +1,135 @@
 """Cosmos Policy adapter for the VLA probing suite.
 
-Cosmos Policy (NVIDIA) fine-tunes a Cosmos Predict2 video model for robot
-control. Unlike standard VLAs that use vision-language backbones, Cosmos
-Policy leverages a video generation model to understand physical dynamics.
+Cosmos Policy is a video foundation model (Cosmos Predict2) fine-tuned for
+visuomotor control. Unlike other VLAs in the suite, it operates on a latent
+video diffusion paradigm: images are tokenized by a VAE, combined with
+proprio/action/value latents into a temporal sequence, and denoised to
+produce action chunks.
 
 Architecture:
-    Images (224x224) -> Cosmos Predict2 (2B video model)
-    Language -> T5 text embeddings
-    -> Diffusion-based denoising -> action chunks + future images + value
+    Images (224x224) -> VAE encoder -> latent frames
+    Proprio -> linear projection -> latent frame
+    Language -> T5-XXL -> text conditioning embedding
+    Latent sequence -> Cosmos Predict2 (diffusion transformer) -> denoised latents
+    Action latent -> linear projection -> action chunk (16 steps × 7D)
 
-Action format: 7-DoF for LIBERO (same as π0), 16-step chunks
-Also predicts future images and value estimates (unique to this model).
+Action format: 7-DoF end-effector deltas [x, y, z, roll, pitch, yaw, gripper]
+Output is 16-step action chunk (configurable via chunk_size).
 
-REQUIRES CUDA — this adapter cannot run on MPS or CPU.
-Use scripts/run_cosmos_cloud.sh on a cloud GPU instance.
-
-Checkpoint: nvidia/Cosmos-Policy-LIBERO-Predict2-2B
+Requires CUDA — flash attention, triton, and megatron-core are hard deps.
 """
 
+import os
+import sys
 from typing import Any
 
 import numpy as np
 import torch
 
-from vla_probing.adapter import VLAAdapter, VLAInput, VLAOutput
+from vla_probing.adapter import VLAAdapter, VLAInput, VLAOutput, _get_device
 
 
-# Standard image size for Cosmos Policy
+# Image size expected by Cosmos Policy
 COSMOS_IMAGE_SIZE = 224
 
 
 class CosmosPolicyAdapter(VLAAdapter):
     """Adapter for Cosmos Policy (nvidia/Cosmos-Policy-LIBERO-Predict2-2B).
 
-    This model is architecturally distinct from all other models in the suite:
-    it uses a video generation backbone (Cosmos Predict2) rather than a VLM.
-    Actions are generated via diffusion-based denoising in latent video space.
+    Cosmos Policy is unique in the probing suite:
+        - Video diffusion model (not autoregressive or flow matching)
+        - Outputs action chunks + future image predictions + value estimates
+        - Uses T5-XXL text embeddings (not tokenized prompts)
+        - Requires CUDA (flash attention, triton, megatron-core)
+        - ~6.8GB VRAM for LIBERO inference
 
-    Unique capabilities:
-        - Predicts future images (what the scene should look like)
-        - Predicts value estimates (expected cumulative reward)
-        - Uses flow matching in video latent space for action generation
-
-    Variance: Uses seed-based sampling like flow matching models.
+    For variance measurement, we use different seeds (0-9) for the
+    diffusion sampling process, similar to X-VLA's flow matching seeds.
     """
 
     model_name = "cosmos_policy"
 
+    # HuggingFace checkpoint
+    CHECKPOINT = "nvidia/Cosmos-Policy-LIBERO-Predict2-2B"
+
     def __init__(self) -> None:
         self.model = None
-        self.config = None
         self.cosmos_config = None
+        self.cfg = None
         self.dataset_stats = None
         self.device = None
-        self._seed = 0
+        self._cosmos_utils = None  # Lazy import of cosmos_policy utils
 
     @property
     def action_dim(self) -> int:
-        return 7  # LIBERO: [x, y, z, roll, pitch, yaw, gripper]
+        return 7  # [x, y, z, roll, pitch, yaw, gripper]
 
     @property
     def chunk_size(self) -> int:
-        return 16  # Cosmos Policy predicts 16-step action chunks
+        return 16  # LIBERO default chunk size
 
-    def load_model(self, device: str = "cuda") -> None:
-        """Load Cosmos Policy LIBERO checkpoint.
+    def _ensure_cosmos_importable(self) -> None:
+        """Ensure cosmos_policy package is importable.
 
-        IMPORTANT: This model requires CUDA. It will not work on MPS or CPU
-        due to deep CUDA dependencies in the Cosmos Predict2 backbone.
+        The cosmos_policy repo must be cloned and available. We add it
+        to sys.path if not already installed.
         """
-        # Import cosmos_policy modules (must be on PYTHONPATH)
-        from cosmos_policy.experiments.robot.libero.run_libero_eval import (
-            PolicyEvalConfig,
-        )
-        from cosmos_policy.experiments.robot.cosmos_utils import (
-            get_model,
-            init_t5_text_embeddings_cache,
-            load_dataset_stats,
-        )
-
-        if device != "cuda" and not device.startswith("cuda:"):
-            print(
-                f"WARNING: Cosmos Policy requires CUDA. Got device={device}. "
-                "Attempting CUDA anyway..."
+        try:
+            import cosmos_policy  # noqa: F401
+        except ImportError:
+            # Try common clone locations
+            candidates = [
+                "/workspace/cosmos-policy",
+                "/tmp/cosmos-policy",
+                os.path.expanduser("~/cosmos-policy"),
+            ]
+            for path in candidates:
+                if os.path.isdir(os.path.join(path, "cosmos_policy")):
+                    sys.path.insert(0, path)
+                    print(f"Added {path} to sys.path for cosmos_policy")
+                    return
+            raise ImportError(
+                "cosmos_policy not found. Clone it first:\n"
+                "  git clone https://github.com/nvlabs/cosmos-policy.git /workspace/cosmos-policy\n"
+                "  cd /workspace/cosmos-policy && pip install -e ."
             )
 
-        self.device = torch.device("cuda:0")
+    def load_model(self, device: str = "cuda") -> None:
+        """Load Cosmos Policy model and supporting resources.
 
-        # Configure for LIBERO evaluation
-        self.config = PolicyEvalConfig(
+        Args:
+            device: Must be 'cuda' — Cosmos Policy requires CUDA.
+        """
+        if device == "mps":
+            raise RuntimeError(
+                "Cosmos Policy requires CUDA (flash-attn, triton, megatron-core). "
+                "Cannot run on MPS. Use a CUDA GPU."
+            )
+
+        self._ensure_cosmos_importable()
+
+        from cosmos_policy.experiments.robot.libero.run_libero_eval import PolicyEvalConfig
+        from cosmos_policy.experiments.robot.cosmos_utils import (
+            get_model,
+            load_dataset_stats,
+            init_t5_text_embeddings_cache,
+        )
+
+        self.device = _get_device(device)
+        if self.device.type != "cuda":
+            raise RuntimeError(
+                f"Cosmos Policy requires CUDA, got device: {self.device}"
+            )
+
+        print(f"Loading Cosmos Policy on {self.device}...")
+
+        # Configure for LIBERO inference
+        self.cfg = PolicyEvalConfig(
             config="cosmos_predict2_2b_480p_libero__inference_only",
-            ckpt_path="nvidia/Cosmos-Policy-LIBERO-Predict2-2B",
+            ckpt_path=self.CHECKPOINT,
             config_file="cosmos_policy/config/config.py",
-            dataset_stats_path="nvidia/Cosmos-Policy-LIBERO-Predict2-2B/libero_dataset_statistics.json",
-            t5_text_embeddings_path="nvidia/Cosmos-Policy-LIBERO-Predict2-2B/libero_t5_embeddings.pkl",
+            dataset_stats_path=f"{self.CHECKPOINT}/libero_dataset_statistics.json",
+            t5_text_embeddings_path=f"{self.CHECKPOINT}/libero_t5_embeddings.pkl",
             use_wrist_image=True,
             use_proprio=True,
             normalize_proprio=True,
@@ -102,133 +138,136 @@ class CosmosPolicyAdapter(VLAAdapter):
             num_open_loop_steps=16,
             trained_with_image_aug=True,
             use_jpeg_compression=True,
-            flip_images=True,  # LIBERO images render upside-down
+            flip_images=True,  # LIBERO renders upside-down
             num_denoising_steps_action=5,
             num_denoising_steps_future_state=1,
             num_denoising_steps_value=1,
         )
 
-        # Load dataset stats for action/proprio scaling
-        self.dataset_stats = load_dataset_stats(self.config.dataset_stats_path)
+        # Load dataset stats for action/proprio normalization
+        self.dataset_stats = load_dataset_stats(self.cfg.dataset_stats_path)
 
         # Initialize T5 text embeddings cache
-        init_t5_text_embeddings_cache(self.config.t5_text_embeddings_path)
+        init_t5_text_embeddings_cache(self.cfg.t5_text_embeddings_path)
 
-        # Load model
-        print("Loading Cosmos Policy LIBERO checkpoint...")
-        self.model, self.cosmos_config = get_model(self.config)
+        # Load the model
+        self.model, self.cosmos_config = get_model(self.cfg)
+
+        # Store reference to cosmos_utils for get_action calls
+        import cosmos_policy.experiments.robot.cosmos_utils as cosmos_utils
+        self._cosmos_utils = cosmos_utils
 
         n_params = sum(p.numel() for p in self.model.parameters()) / 1e9
-        print(f"Cosmos Policy loaded: {n_params:.1f}B params on {self.device}")
-
-    def _prepare_observation(self, inp: VLAInput) -> dict[str, Any]:
-        """Convert VLAInput to Cosmos Policy observation format.
-
-        Cosmos Policy LIBERO expects:
-            - primary_image: third-person view (H, W, 3) uint8
-            - wrist_image: wrist camera view (H, W, 3) uint8
-            - proprio: proprioceptive state (8D for LIBERO)
-        """
-        import cv2
-
-        # Map our scene cameras to Cosmos Policy's expected format
-        # image = primary (third-person), image2 = wrist camera
-        primary = inp.images[0]  # (H, W, 3) uint8
-        wrist = inp.images[1] if len(inp.images) > 1 else inp.images[0]
-
-        # Resize to 224x224 (Cosmos Policy's expected size)
-        if primary.shape[:2] != (COSMOS_IMAGE_SIZE, COSMOS_IMAGE_SIZE):
-            primary = cv2.resize(
-                primary,
-                (COSMOS_IMAGE_SIZE, COSMOS_IMAGE_SIZE),
-                interpolation=cv2.INTER_LINEAR,
-            )
-        if wrist.shape[:2] != (COSMOS_IMAGE_SIZE, COSMOS_IMAGE_SIZE):
-            wrist = cv2.resize(
-                wrist,
-                (COSMOS_IMAGE_SIZE, COSMOS_IMAGE_SIZE),
-                interpolation=cv2.INTER_LINEAR,
-            )
-
-        obs = {
-            "primary_image": primary,
-            "wrist_image": wrist,
-        }
-
-        # Add proprioception if available
-        if inp.proprio is not None:
-            obs["proprio"] = inp.proprio[:8].astype(np.float32)
-
-        return obs
-
-    def predict_action(self, inp: VLAInput) -> VLAOutput:
-        """Run inference and return action chunk.
-
-        Uses Cosmos Policy's get_action() which handles:
-        1. T5 text embedding of the language instruction
-        2. Image preprocessing and latent encoding
-        3. Diffusion-based denoising to generate actions
-        4. Action unnormalization to original dataset scale
-        """
-        from cosmos_policy.experiments.robot.cosmos_utils import get_action
-
-        obs = self._prepare_observation(inp)
-
-        # get_action returns a dict with 'actions', 'future_image_predictions', 'value_prediction'
-        result = get_action(
-            self.config,
-            self.model,
-            self.dataset_stats,
-            obs,
-            inp.prompt,  # T5 embedding computed on-the-fly if not cached
-            seed=self._seed,
-            num_denoising_steps_action=5,
-            generate_future_state_and_value_in_parallel=True,
+        print(
+            f"Cosmos Policy loaded: {n_params:.1f}B params on {self.device}"
         )
 
-        # Extract action chunk: list of 16 action arrays -> (16, 7) numpy
-        actions = result["actions"]
+    def _prepare_observation(self, inp: VLAInput) -> dict:
+        """Convert VLAInput to Cosmos Policy observation dict.
+
+        Cosmos Policy expects:
+            - primary_image: third-person camera (H, W, 3) uint8
+            - wrist_image: wrist camera (H, W, 3) uint8
+            - proprio: proprioceptive state vector
+        """
+        # Primary = first image (agentview / third-person)
+        primary_image = inp.images[0]
+
+        # Wrist = second image if available, else duplicate primary
+        if len(inp.images) > 1:
+            wrist_image = inp.images[1]
+        else:
+            wrist_image = primary_image.copy()
+
+        # Ensure images are uint8 numpy arrays
+        if primary_image.dtype != np.uint8:
+            primary_image = (primary_image * 255).astype(np.uint8)
+        if wrist_image.dtype != np.uint8:
+            wrist_image = (wrist_image * 255).astype(np.uint8)
+
+        return {
+            "primary_image": primary_image,
+            "wrist_image": wrist_image,
+            "proprio": inp.proprio.astype(np.float64),
+        }
+
+    def predict_action(self, inp: VLAInput, seed: int = 0) -> VLAOutput:
+        """Run inference and return action chunk prediction.
+
+        Uses Cosmos Policy's diffusion sampling to generate a 16-step
+        action chunk. The seed controls the diffusion noise for
+        stochasticity measurement.
+        """
+        obs = self._prepare_observation(inp)
+
+        action_return_dict = self._cosmos_utils.get_action(
+            cfg=self.cfg,
+            model=self.model,
+            dataset_stats=self.dataset_stats,
+            obs=obs,
+            task_label_or_embedding=inp.prompt,
+            seed=seed,
+            num_denoising_steps_action=self.cfg.num_denoising_steps_action,
+            generate_future_state_and_value_in_parallel=False,
+        )
+
+        # Extract actions — shape: list of (7,) arrays or (chunk_size, 7)
+        actions = action_return_dict["actions"]
         if isinstance(actions, list):
             actions = np.array(actions)
         if actions.ndim == 1:
             actions = actions.reshape(1, -1)
 
-        # Store extra outputs for potential analysis
-        raw_output = {
-            "value_prediction": (
-                result.get("value_prediction", None)
-            ),
-        }
-
-        # Save future image predictions if available
-        future_imgs = result.get("future_image_predictions", None)
-        if future_imgs is not None:
-            raw_output["future_image_predictions"] = future_imgs
-
         return VLAOutput(
             actions=actions,
-            raw_output=raw_output,
+            raw_output={
+                "seed": seed,
+                "value_prediction": action_return_dict.get("value_prediction"),
+                "future_image_predictions": action_return_dict.get("future_image_predictions"),
+            },
         )
+
+    def predict_action_multi_seed(
+        self, inp: VLAInput, n_seeds: int = 10
+    ) -> list[VLAOutput]:
+        """Run inference with multiple seeds for diffusion stochasticity."""
+        results = []
+        for seed in range(n_seeds):
+            results.append(self.predict_action(inp, seed=seed))
+        return results
 
     def get_attention(self, inp: VLAInput) -> dict[str, np.ndarray]:
-        """Extract attention from Cosmos Policy.
+        """Attempt attention extraction from Cosmos Policy.
 
-        Cosmos Policy uses a video diffusion transformer, not a standard
-        VLM with text-to-vision attention. Attention extraction would
-        require hooking into the DiT's cross-attention layers.
+        Cosmos Policy uses a diffusion transformer architecture where
+        attention maps are computed during the denoising process. Direct
+        extraction is complex due to the multi-step denoising. We return
+        empty attention maps and note this as a known limitation.
 
-        For now, returns empty dict — attention probing for video models
-        is an open research question.
+        The model's understanding of the scene is better probed through
+        the other 7 probes (direction, spatial, etc.) rather than raw
+        attention maps.
         """
+        # Cosmos Policy's diffusion transformer doesn't expose attention
+        # in the same way as encoder-decoder or autoregressive models.
+        # The denoising process runs multiple steps, each with different
+        # attention patterns. Meaningful extraction would require
+        # aggregating across denoising steps.
+        #
+        # For now, return zeros — the attention probe will report IoU=0,
+        # which is the honest result (same approach as π0).
         print(
-            "WARNING: Attention extraction not yet implemented for Cosmos Policy. "
-            "The DiT architecture uses different attention patterns than VLMs."
+            "WARNING: Cosmos Policy attention extraction not implemented. "
+            "Diffusion transformer attention requires multi-step aggregation."
         )
+        dummy_size = 16  # Small placeholder grid
         return {
             "spatial_attention": np.zeros((256, 256)),
+            "raw_attention": np.zeros((dummy_size, dummy_size)),
+            "patch_attention": np.zeros((dummy_size, dummy_size)),
             "n_image_tokens": 0,
+            "patch_grid_size": dummy_size,
         }
 
     def reset(self) -> None:
-        """Reset seed for next prediction."""
-        self._seed = (self._seed + 1) % 256
+        """No internal state to reset (each inference is independent)."""
