@@ -34,48 +34,64 @@ PROBE_INFO = {
         "display": "Baseline",
         "description": "Baseline trajectory for 'pick up the red block'",
         "key_metric": "direction_alignment",
+        "metric_explanation": "Does the arm move toward the target? 1.0 = perfect, 0 = random, negative = moves away.",
+        "higher_is_better": True,
         "tests": "Basic pick-and-place competence and trajectory quality.",
     },
     "spatial_symmetry": {
         "display": "Spatial Symmetry",
         "description": "Swap block positions to test spatial understanding",
         "key_metric": "perturbation_sensitivity",
+        "metric_explanation": "How much does the trajectory change when block positions are swapped? Higher = more spatially aware.",
+        "higher_is_better": True,
         "tests": "Whether the model adapts its trajectory when object positions are swapped.",
     },
     "camera_sensitivity": {
         "display": "Camera Sensitivity",
         "description": "Mirror/rotate camera to test spatial understanding",
         "key_metric": "mirror_camera_sensitivity",
+        "metric_explanation": "How much does mirroring the camera change the output? Higher = more sensitive to camera view.",
+        "higher_is_better": True,
         "tests": "Robustness to camera transformations (mirror, flip).",
     },
     "view_ablation": {
         "display": "View Ablation",
         "description": "Remove primary/secondary camera views",
         "key_metric": "full_vision_ablation_sensitivity",
+        "metric_explanation": "How much does blacking out all cameras change output? 0 = ignores vision entirely (bad).",
+        "higher_is_better": True,
         "tests": "Dependence on each camera view — which views carry the most information.",
     },
     "counterfactual": {
         "display": "Counterfactual",
         "description": "Test language understanding with synonym variations",
         "key_metric": "mean_synonym_sensitivity",
+        "metric_explanation": "Do synonyms ('grab' vs 'pick up') produce different actions? Low = good semantic understanding.",
+        "higher_is_better": False,
         "tests": "Language grounding — do synonyms produce similar actions?",
     },
     "null_action": {
         "display": "Null Action",
         "description": "Test null action compliance with 'don't move' prompts",
         "key_metric": "null_vs_baseline_ratio",
+        "metric_explanation": "Movement when told 'don't move' ÷ normal movement. 0 = stays still (good), 1.0 = ignores instruction (bad).",
+        "higher_is_better": False,
         "tests": "Whether the model can stay still when told not to move.",
     },
     "attention": {
         "display": "Attention",
         "description": "Extract and visualize attention maps",
         "key_metric": "mean_attention_iou",
+        "metric_explanation": "Does attention overlap with the referenced object? 1.0 = focused on target, 0 = looking elsewhere.",
+        "higher_is_better": True,
         "tests": "Whether attention focuses on the referenced object.",
     },
     "perturbation": {
         "display": "Perturbation",
         "description": "Move blocks to test trajectory adaptation",
         "key_metric": "mean_perturbation_sensitivity",
+        "metric_explanation": "When a block is shifted, does the trajectory adapt? Higher = more responsive to scene changes.",
+        "higher_is_better": True,
         "tests": "Sensitivity to object position changes — does the model re-plan?",
     },
 }
@@ -309,21 +325,67 @@ elif page == "Overview":
 
     summary_df = pd.DataFrame(rows).set_index("Model")
 
-    # Color-coded heatmap using plotly
+    # Normalize per-probe so green always = good, red always = bad.
+    # For "higher_is_better" probes, high raw value → high normalized (green).
+    # For "lower_is_better" probes, low raw value → high normalized (green).
+    import numpy as np
+
+    norm_z = np.full_like(summary_df.values, np.nan, dtype=float)
+    hover_texts = []
+    for j, probe in enumerate(probe_names):
+        col = summary_df.iloc[:, j].values.astype(float)
+        info = PROBE_INFO[probe]
+        higher_is_better = info.get("higher_is_better", True)
+        col_min = np.nanmin(col) if not np.all(np.isnan(col)) else 0
+        col_max = np.nanmax(col) if not np.all(np.isnan(col)) else 1
+        col_range = col_max - col_min if col_max != col_min else 1.0
+        for i in range(len(col)):
+            if np.isnan(col[i]):
+                norm_z[i, j] = np.nan
+            else:
+                scaled = (col[i] - col_min) / col_range
+                norm_z[i, j] = scaled if higher_is_better else (1.0 - scaled)
+
+    # Build display text (raw values) and hover text (with explanation)
+    display_text = summary_df.map(
+        lambda v: f"{v:.4f}" if pd.notna(v) else "—"
+    ).values
+    hover_text = []
+    for i in range(len(summary_df)):
+        row_hover = []
+        for j, probe in enumerate(probe_names):
+            info = PROBE_INFO[probe]
+            val = summary_df.iloc[i, j]
+            direction = "↑ higher is better" if info.get("higher_is_better", True) else "↓ lower is better"
+            explanation = info.get("metric_explanation", "")
+            val_str = f"{val:.4f}" if pd.notna(val) else "—"
+            row_hover.append(
+                f"<b>{info['display']}</b> ({info['key_metric']})<br>"
+                f"Value: {val_str} ({direction})<br>"
+                f"{explanation}"
+            )
+        hover_text.append(row_hover)
+
     fig = go.Figure(
         data=go.Heatmap(
-            z=summary_df.values,
+            z=norm_z,
             x=summary_df.columns.tolist(),
             y=summary_df.index.tolist(),
             colorscale="RdYlGn",
-            text=summary_df.map(
-                lambda v: f"{v:.4f}" if pd.notna(v) else "—"
-            ).values,
+            text=display_text,
             texttemplate="%{text}",
             textfont={"size": 12},
+            hovertext=hover_text,
+            hovertemplate="%{hovertext}<extra></extra>",
             hoverongaps=False,
             showscale=True,
-            colorbar=dict(title="Value"),
+            zmin=0,
+            zmax=1,
+            colorbar=dict(
+                title="Score",
+                tickvals=[0, 0.5, 1],
+                ticktext=["Bad", "Mid", "Good"],
+            ),
         )
     )
     fig.update_layout(
@@ -332,6 +394,26 @@ elif page == "Overview":
         xaxis=dict(side="top"),
     )
     st.plotly_chart(fig, use_container_width=True)
+
+    # Legend explaining each probe's key metric
+    with st.expander("📖 How to read this chart"):
+        st.markdown(
+            "Each cell shows the **raw value** of the most important metric for that probe. "
+            "Colors are normalized **per-probe** so that **green = good** and **red = bad**, "
+            "regardless of whether higher or lower is better for that metric.\n\n"
+            "Hover over any cell for a detailed explanation.\n"
+        )
+        legend_rows = []
+        for probe in probe_names:
+            info = PROBE_INFO[probe]
+            direction = "↑ Higher is better" if info.get("higher_is_better", True) else "↓ Lower is better"
+            legend_rows.append({
+                "Probe": info["display"],
+                "Key Metric": f"`{info['key_metric']}`",
+                "Direction": direction,
+                "What it measures": info.get("metric_explanation", ""),
+            })
+        st.table(pd.DataFrame(legend_rows).set_index("Probe"))
 
     # ----- Awaiting results -----
     all_model_keys = ["xvla", "pi0", "smolvla", "openvla"]
