@@ -100,7 +100,6 @@ PROBE_INFO = {
 MODEL_COLORS = {
     "xvla": "#636EFA",
     "pi0": "#EF553B",
-    "smolvla": "#00CC96",
     "openvla": "#AB63FA",
 }
 
@@ -113,7 +112,6 @@ SCENE_COLOR_VARIANTS = {
 MODEL_DISPLAY = {
     "xvla": "X-VLA",
     "pi0": "Pi0",
-    "smolvla": "SmolVLA",
     "openvla": "OpenVLA",
 }
 
@@ -286,7 +284,6 @@ Each probe tests a specific hypothesis about what the model has learned:
 |-------|--------|-------------|-------------|------------|
 | **X-VLA** | 0.9B | InternVL2 + soft prompts + flow matching | Continuous | WidowX |
 | **π0** | 3B | PaliGemma + flow matching | Continuous | LIBERO / cross-embodiment |
-| **SmolVLA** | ~0.5B | SmolVLM2 + flow matching | Continuous | SO-100 / community |
 | **OpenVLA** | 7B | Llama-2 + DINOv2 + SigLIP → text tokens | Discrete (text) | WidowX / BridgeV2 |
 
 ### Key Research Questions
@@ -310,7 +307,7 @@ success rates. We measure *what the models understand*.
 These models generate actions in fundamentally different ways, which affects how we
 measure their confidence and consistency.
 
-#### Flow Matching (X-VLA, π0, SmolVLA)
+#### Flow Matching (X-VLA, π0)
 
 These models start from **random noise** and iteratively "denoise" it into an action,
 similar to how image diffusion models work. Think of it like starting with a page of
@@ -343,7 +340,6 @@ The **sampling temperature** controls how "adventurous" the model is when pickin
 |-------|-------------------|---------|-------------------|
 | X-VLA | Flow matching seeds | Seeds 0–9 | 10 |
 | π0 | Flow matching seeds | Seeds 0–9 | 10 |
-| SmolVLA | Flow matching seeds | Seeds 0–9 | 10 |
 | OpenVLA | Sampling temperature | **T = 0.5** | 10 |
 
 We chose **temperature 0.5** for OpenVLA as a balance: enough randomness to reveal
@@ -507,7 +503,7 @@ elif page == "Overview":
     # Methodology note
     with st.expander("🎲 Variance methodology"):
         st.markdown(
-            "**Flow matching models** (X-VLA, π0, SmolVLA) are tested with 10 random seeds "
+            "**Flow matching models** (X-VLA, π0) are tested with 10 random seeds "
             "to measure output variance. Different seeds produce different random starting noise "
             "for the denoising process.\n\n"
             "**Autoregressive models** (OpenVLA) use **sampling temperature = 0.5** to introduce "
@@ -518,7 +514,7 @@ elif page == "Overview":
 
     # ----- Awaiting results -----
     base_models_present = {_parse_result_key("probe_results_" + m)[1] for m in model_names}
-    all_base_models = ["xvla", "pi0", "smolvla", "openvla"]
+    all_base_models = ["xvla", "pi0", "openvla"]
     missing = [m for m in all_base_models if m not in base_models_present]
     if missing:
         st.caption(

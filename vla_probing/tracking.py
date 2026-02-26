@@ -15,7 +15,7 @@ import numpy as np
 class ProbeResult:
     """Standardized result from a single probe run."""
 
-    model: str  # "xvla" | "pi0" | "smolvla" | "openvla"
+    model: str  # "xvla" | "pi0" | "openvla"
     embodiment: str  # "widowx" | "libero_franka" | "so100"
     probe: str  # "baseline" | "spatial_symmetry" | etc.
     probe_variant: str  # specific variant description

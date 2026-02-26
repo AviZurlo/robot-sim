@@ -10,7 +10,7 @@ Tests:
 - Spatial reasoning ("Which block is closer to the robot?")
 - Counting ("How many blocks are on the table?")
 
-This probe is infeasible for X-VLA, pi0, and SmolVLA (all have separate
+This probe is infeasible for X-VLA and pi0 (both have separate
 action heads that can't generate language).
 """
 

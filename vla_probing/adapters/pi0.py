@@ -31,7 +31,7 @@ def _install_siglip_check_shim() -> None:
     lerobot 0.4.3's PI0Pytorch.__init__ imports
     `transformers.models.siglip.check` which only exists in a custom
     transformers fork (branch `fix/lerobot_openpi`). Installing that fork
-    breaks other VLA adapters (X-VLA, SmolVLA) that need stock transformers.
+    breaks other VLA adapters (X-VLA) that need stock transformers.
 
     This shim creates a minimal `check` module so PI0Pytorch can instantiate
     with stock transformers >=4.57.
