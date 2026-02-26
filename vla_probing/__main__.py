@@ -21,6 +21,7 @@ def main() -> None:
         "null_action": "vla_probing.probes.null_action",
         "attention": "vla_probing.probes.attention",
         "perturbation": "vla_probing.probes.perturbation",
+        "vlm_query": "vla_probing.probes.vlm_query",
     }
 
     if len(sys.argv) > 1 and sys.argv[1] in probe_modules:

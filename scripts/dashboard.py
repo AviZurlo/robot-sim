@@ -205,6 +205,28 @@ if page == "Live Training":
 
             st.line_chart(df, use_container_width=True)
 
+            # Evaluation results during training
+            st.subheader("Evaluation Results During Training")
+            eval_history_path = train_dir / "eval_history.json"
+            eval_history = load_json(eval_history_path)
+
+            if eval_history and len(eval_history) > 0:
+                import pandas as pd
+                eval_df = pd.DataFrame(eval_history)
+                eval_df["success_rate_pct"] = eval_df["success_rate"] * 100
+                eval_df = eval_df.set_index("step")
+
+                chart_df = eval_df[["success_rate_pct", "avg_reward"]].rename(columns={
+                    "success_rate_pct": "Success Rate (%)",
+                    "avg_reward": "Avg Reward",
+                })
+                st.line_chart(chart_df, use_container_width=True)
+            else:
+                st.info(
+                    "No evaluation data yet. Use `--eval-freq` to enable periodic "
+                    "evaluation during training."
+                )
+
             # Show static plot if it exists
             plot_path = PLOTS_DIR / "training_loss.png"
             if plot_path.exists():

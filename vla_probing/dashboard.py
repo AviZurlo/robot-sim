@@ -150,7 +150,7 @@ else:
 
 page = st.sidebar.radio(
     "Navigate",
-    ["Overview", "Per-Probe Details", "Metrics Explorer", "Attention Maps"],
+    ["About", "Overview", "Per-Probe Details", "Metrics Explorer", "Attention Maps"],
 )
 
 st.sidebar.divider()
@@ -190,9 +190,80 @@ if not model_names:
 
 
 # ===================================================================
+# PAGE: About
+# ===================================================================
+if page == "About":
+    st.header("VLA Comparison Project")
+    st.subheader("Debugging as Architecture Insight")
+
+    st.markdown("""
+This project runs **diagnostic probes** across multiple Vision-Language-Action (VLA)
+models to understand what they actually learn about vision, language, and action —
+and where they break.
+
+### Inspiration
+
+This work is inspired by [**Avik De's article: "Debugging as Architecture Insight:
+Dissecting a VLA"**](https://www.avikde.me/p/debugging-as-architecture-insight),
+which probes X-VLA to reveal that VLAs often learn spatial heuristics from training
+data rather than genuine scene understanding, fail silently (producing plausible but
+wrong trajectories), and can't be debugged like classical robotics systems.
+
+We extend his approach by running the **same diagnostic experiments across multiple
+VLA architectures** to compare them head-to-head.
+
+### The 8 Diagnostic Probes
+
+Each probe tests a specific hypothesis about what the model has learned:
+
+| # | Probe | What It Tests |
+|---|-------|--------------|
+| 1 | **Baseline Trajectory** | Does the model reach for the correct object? |
+| 2 | **Spatial Symmetry** | Does the model understand absolute vs. relative positions? |
+| 3 | **Camera Sensitivity** | Is spatial reasoning tied to camera pose or truly 3D? |
+| 4 | **View Ablation** | Which camera views carry the most information? |
+| 5 | **Counterfactual Prompts** | Does the language encoder collapse synonyms correctly? |
+| 6 | **Null Action** | Can the model comply with "don't move"? |
+| 7 | **Attention Visualization** | Is the model attending to the referenced object? |
+| 8 | **Environment Perturbation** | Does the model re-plan when objects move? |
+
+### Models Under Comparison
+
+| Model | Params | Architecture | Action Space | Embodiment |
+|-------|--------|-------------|-------------|------------|
+| **X-VLA** | 0.9B | InternVL2 + soft prompts + flow matching | Continuous | WidowX |
+| **π0** | 3B | PaliGemma + flow matching | Continuous | LIBERO / cross-embodiment |
+| **SmolVLA** | ~0.5B | SmolVLM2 + flow matching | Continuous | SO-100 / community |
+| **OpenVLA** | 7B | Llama-2 + DINOv2 + SigLIP → text tokens | Discrete (text) | WidowX / BridgeV2 |
+
+### Key Research Questions
+
+1. Do different action representations (continuous flow matching vs. text tokens) produce fundamentally different failure modes?
+2. Does model scale (0.5B → 7B) improve spatial understanding, or just task coverage?
+3. Are soft prompts (X-VLA) encoding embodiment-specific spatial reasoning, or just biases?
+4. Does any architecture show genuine null-action compliance?
+5. How much of VLA behavior is spatial template matching vs. actual scene understanding?
+
+### What's Novel
+
+Nobody has done systematic **interpretability probing** across VLA architectures.
+Existing comparisons (e.g., [RoboVLMs](https://robovlms.github.io/)) measure task
+success rates. We measure *what the models understand*.
+
+---
+
+**References:**
+- [Avik De — Debugging as Architecture Insight](https://www.avikde.me/p/debugging-as-architecture-insight)
+- [Avik De — The Architecture Behind "End-to-End" Robotics Pipelines](https://www.avikde.me/p/the-architecture-behind-end-to-end)
+- [X-VLA Paper (arXiv 2510.10274)](https://arxiv.org/abs/2510.10274)
+- [avikde/vla-pipeline (GitHub)](https://github.com/avikde/vla-pipeline)
+- [LeRobot (HuggingFace)](https://github.com/huggingface/lerobot)
+""")
+
+# ===================================================================
 # PAGE: Overview
 # ===================================================================
-if page == "Overview":
+elif page == "Overview":
     st.header("Probe Results Overview")
 
     # ----- Model metadata cards -----

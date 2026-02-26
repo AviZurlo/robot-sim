@@ -29,6 +29,119 @@ from lerobot.datasets.utils import dataset_to_policy_features
 from lerobot.policies.factory import make_pre_post_processors
 
 
+import numpy as np
+
+
+# Task -> environment configuration (mirrors evaluate.py)
+TASK_ENV_MAP = {
+    "transfer_cube": {
+        "gym_task": "AlohaTransferCube-v0",
+        "fps": 50,
+        "episode_length": 400,
+        "obs_type": "pixels_agent_pos",
+    },
+    "pusht": {
+        "gym_task": "PushT-v0",
+        "fps": 10,
+        "episode_length": 300,
+        "obs_type": "environment_state_agent_pos",
+    },
+}
+
+
+def run_eval_during_training(
+    policy,
+    task: str,
+    policy_cfg,
+    dataset_stats: dict,
+    device: torch.device,
+    n_episodes: int = 10,
+    seed: int = 1000,
+) -> dict:
+    """Run evaluation episodes and return metrics dict."""
+    import gymnasium as gym
+    from lerobot.envs.factory import make_env, make_env_pre_post_processors
+    from lerobot.envs.utils import add_envs_task, preprocess_observation
+    from lerobot.policies.factory import make_pre_post_processors as _make_pp
+    from lerobot.utils.constants import ACTION
+
+    is_pusht = task == "pusht"
+    task_env = TASK_ENV_MAP[task]
+
+    # Create env config
+    if is_pusht:
+        from lerobot.envs.configs import PushtEnv
+        env_cfg = PushtEnv(
+            task=task_env["gym_task"], fps=task_env["fps"],
+            episode_length=task_env["episode_length"],
+            obs_type=task_env["obs_type"], render_mode="rgb_array",
+        )
+    else:
+        from lerobot.envs.configs import AlohaEnv
+        env_cfg = AlohaEnv(
+            task=task_env["gym_task"], fps=task_env["fps"],
+            episode_length=task_env["episode_length"],
+            obs_type=task_env["obs_type"], render_mode="rgb_array",
+        )
+
+    envs = make_env(cfg=env_cfg, n_envs=1, use_async_envs=False)
+    env_key = "pusht" if is_pusht else "aloha"
+    vec_env = envs[env_key][0]
+
+    env_preprocessor, env_postprocessor = make_env_pre_post_processors(
+        env_cfg=env_cfg, policy_cfg=policy_cfg,
+    )
+    preprocessor, postprocessor = _make_pp(policy_cfg=policy_cfg, dataset_stats=dataset_stats)
+
+    all_metrics = []
+    for ep in range(n_episodes):
+        ep_seed = seed + ep
+        policy.reset()
+        observation, info = vec_env.reset(seed=[ep_seed])
+        max_steps = vec_env.call("_max_episode_steps")[0]
+        done = np.array([False])
+        total_reward = 0.0
+        success = False
+
+        for _step in range(max_steps):
+            observation = preprocess_observation(observation)
+            observation = add_envs_task(vec_env, observation)
+            if is_pusht and "observation.state" in observation:
+                observation["observation.environment_state"] = observation["observation.state"].clone()
+            observation = env_preprocessor(observation)
+            observation = preprocessor(observation)
+
+            with torch.inference_mode():
+                action = policy.select_action(observation)
+            action = postprocessor(action)
+            action_np = env_postprocessor({ACTION: action})[ACTION].to("cpu").numpy()
+
+            observation, reward, terminated, truncated, info = vec_env.step(action_np)
+            total_reward += float(reward[0])
+
+            if "final_info" in info:
+                fi = info["final_info"]
+                if isinstance(fi, dict) and "is_success" in fi:
+                    success = bool(fi["is_success"][0])
+
+            done = terminated | truncated | done
+            if np.all(done):
+                break
+
+        all_metrics.append({"total_reward": total_reward, "success": success})
+
+    vec_env.close()
+
+    n_success = sum(1 for m in all_metrics if m["success"])
+    avg_reward = float(np.mean([m["total_reward"] for m in all_metrics]))
+    return {
+        "success_rate": n_success / n_episodes,
+        "avg_reward": avg_reward,
+        "num_episodes": n_episodes,
+        "n_success": n_success,
+    }
+
+
 # Task configurations
 TASKS = {
     "transfer_cube": {
@@ -133,6 +246,8 @@ def main():
     parser.add_argument("--save-freq", type=int, default=1000, help="Save checkpoint every N steps")
     parser.add_argument("--num-workers", type=int, default=4, help="DataLoader workers")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
+    parser.add_argument("--eval-freq", type=int, default=0,
+                        help="Run evaluation every N steps (0 = disabled)")
     parser.add_argument("--resume", action="store_true", help="Resume from last checkpoint")
     parser.add_argument("--compile", action="store_true", help="Use torch.compile() for faster training")
     parser.add_argument("--use-cache", action="store_true",
@@ -270,6 +385,10 @@ def main():
     print("=" * 60)
 
     loss_history = []
+    eval_history = []
+    eval_history_path = output_dir / "eval_history.json"
+    if eval_history_path.exists():
+        eval_history = json.loads(eval_history_path.read_text())
     step = start_step
     t_start = time.time()
     done = False
@@ -321,6 +440,25 @@ def main():
             if step > 0 and step % args.save_freq == 0:
                 _save_checkpoint(output_dir, step, policy, preprocessor, postprocessor,
                                  optimizer, loss_history)
+
+            # Periodic evaluation
+            if args.eval_freq > 0 and step > 0 and step % args.eval_freq == 0:
+                print(f"  [eval] Running evaluation at step {step}...")
+                policy.eval()
+                eval_result = run_eval_during_training(
+                    policy=policy, task=args.task, policy_cfg=cfg,
+                    dataset_stats=dataset_stats, device=device,
+                )
+                policy.train()
+                entry = {"step": step, **eval_result}
+                eval_history.append(entry)
+                with open(eval_history_path, "w") as f:
+                    json.dump(eval_history, f)
+                sr = eval_result["success_rate"] * 100
+                ns = eval_result["n_success"]
+                ne = eval_result["num_episodes"]
+                ar = eval_result["avg_reward"]
+                print(f"  [eval] step {step} | success={sr:.0f}% ({ns}/{ne}) | avg_reward={ar:.1f}")
 
             step += 1
 
