@@ -11,14 +11,21 @@
 ## Goals
 
 ### Primary
-1. **Reproduce Avik's probing suite** on X-VLA as a baseline
-2. **Run the same probes on 3 additional VLAs** (π0, SmolVLA, OpenVLA) to compare architectural strengths/weaknesses
-3. **Produce a structured comparison** with quantitative metrics and a robust results tracking framework
+1. ✅ **Reproduce Avik's probing suite** on X-VLA as a baseline
+2. ✅ **Run the same probes on additional VLAs** (π0, OpenVLA) to compare architectural strengths/weaknesses
+3. ✅ **Produce a structured comparison** with quantitative metrics, interactive dashboard, and robust results tracking
+4. **Test each model on its native embodiment** for fair comparison
 
 ### Secondary
-4. Understand which VLA architectures are most robust to real-world deployment concerns
-5. Build reusable probing harness that can be applied to new VLAs as they come out
-6. Blog post / content piece showing results (networking opportunity with Avik De, PI team, HuggingFace robotics)
+5. Understand which VLA architectures are most robust to real-world deployment concerns
+6. Build reusable probing harness that can be applied to new VLAs as they come out
+7. Blog post / content piece showing results (networking opportunity with Avik De, PI team, HuggingFace robotics)
+
+### Future Expansion
+8. **GR00T N1.6** — NVIDIA's 3B VLA (Cosmos-Reason + DiT action head). Weights available, needs CUDA or eager-attention workaround.
+9. **mimic-video** — Video-Action Model (Cosmos video backbone + flow matching action decoder). No public weights yet.
+10. **DreamDojo** — World model approach. Could be probed once paired with an action decoder.
+11. More video-model-based policies as they emerge
 
 ### Non-Goals (for now)
 - Closed-loop evaluation (running policies in full sim loops) — separate project
@@ -29,215 +36,248 @@
 
 ## Design Principles
 
-1. **Zero-shot performance only** — use each model's best-supported embodiment from pretraining to normalize results
-2. **Robust experiment tracking** — every probe result logged with full reproducibility metadata
-3. **Leverage existing tools** — no rebuilding what's already available (LeRobot, LIBERO, Captum, W&B)
-4. **All 4 models stay in scope** — X-VLA, π0, SmolVLA, OpenVLA
-5. **AI agents do the implementation** — timelines are compressed vs. human execution
+1. **Zero-shot performance only** — use each model's best-supported embodiment from pretraining
+2. **Native embodiment testing** — each model tested on the embodiment it was trained on
+3. **Robust experiment tracking** — every probe result logged with full reproducibility metadata
+4. **Leverage existing tools** — no rebuilding what's already available (LeRobot, MuJoCo, W&B)
+5. **Black-box probing** — probes work regardless of internal architecture (flow matching, autoregressive, video prediction)
+6. **AI agents do the implementation** — timelines are compressed vs. human execution
 
 ---
 
-## The Probing Suite (from Avik's article)
+## Models
 
-| # | Probe | What it tests | Method |
-|---|-------|--------------|--------|
-| 1 | **Baseline trajectory** | Does the model reach for the right object? | Visualize action trajectory for "pick up the red block" |
-| 2 | **Spatial symmetry** | Does the model understand absolute vs relative positions? | Swap block positions (red ↔ blue), compare trajectories |
-| 3 | **Camera sensitivity** | Is spatial understanding tied to camera pose? | Mirror/rotate camera view, observe trajectory changes |
-| 4 | **View ablation** | Which camera views matter? | Remove primary/secondary views one at a time |
-| 5 | **Counterfactual prompts** | Does the language encoder understand synonyms? | "red block" vs "red cube" vs "crimson block" — should produce same action |
-| 6 | **Null action prompts** | Does the model understand "don't move"? | "don't move" / "stay still" — should produce zero/minimal motion |
-| 7 | **Attention visualization** | Where is the model looking? | Extract and overlay attention maps on input images |
-| 8 | **Environment perturbation** | Does the model track object changes? | Move blocks to new positions, check trajectory adaptation |
+### Active Models (with results)
 
----
+| # | Model | Params | Architecture | Action Space | Embodiment(s) | Status |
+|---|-------|--------|-------------|-------------|---------------|--------|
+| **1** | **X-VLA** | 0.9B | InternVL2 + soft prompts + flow matching | Continuous 20D | WidowX (native) | ✅ Complete |
+| **2** | **π0** | 3B | PaliGemma + Gemma action expert + flow matching | Continuous 7D | Franka (native) + WidowX (cross) | ✅ Complete |
+| **3** | **OpenVLA** | 7B | Llama-2 + DINOv2 + SigLIP → discrete tokens | Discrete 7D (256 bins) | WidowX (native) | ✅ Complete |
 
-## Model Selection & Embodiment Strategy
+### Removed
+- **SmolVLA** (0.5B) — Removed. No standard simulation for SO-100 training embodiment. Cross-embodiment results didn't add signal.
 
-### Key Insight: Use Each Model's Native Embodiment
-
-Instead of forcing all models onto WidowX (which creates unfair comparisons), we use each model's best-supported embodiment for zero-shot evaluation. The probes test *architectural behaviors*, not task-specific performance — so different embodiments are acceptable.
-
-### Model Details
-
-| # | Model | Params | Peak Memory (fp16) | Architecture | Best Embodiment | Checkpoint |
-|---|-------|--------|-------------------|-------------|----------------|------------|
-| **1** | **X-VLA** | 0.9B | ~2-4 GB | InternVL2 + soft prompts + flow matching | WidowX (primary training) | `lerobot/xvla-widowx` |
-| **2** | **π0** | 3B | ~8-12 GB | PaliGemma + flow matching | LIBERO (Franka Panda) | `lerobot/pi0_libero_finetuned` |
-| **3** | **SmolVLA** | ~0.5B | ~1-2 GB | SmolVLM2 + flow matching | SO-100 / community data | `lerobot/smolvla_base` |
-| **4** | **OpenVLA-7B** | 7B | ~16-18 GB | Llama-2 + text-token actions | WidowX / BridgeV2 | `openvla/openvla-7b` |
-
-### Embodiment Notes
-- **X-VLA + OpenVLA** share WidowX — direct comparison possible on same embodiment
-- **π0** has a LIBERO fine-tuned checkpoint — use LIBERO Franka Panda environment
-- **SmolVLA** was trained on community robot data (SO-100) — most challenging for standard benchmarks; may need fine-tuning on LIBERO for fair comparison
-- **Cross-embodiment probes** (same probe, different embodiment) are still valid for testing architectural properties like attention patterns, null action compliance, and semantic understanding
+### Future Models
+- **GR00T N1.6** (3B) — NVIDIA VLA. Cosmos-Reason-2B VLM + DiT. Public weights. Needs CUDA (possible eager-attention workaround). Has BridgeV2 + LIBERO finetuned checkpoints.
+- **mimic-video** — Video-Action Model. Cosmos video backbone + flow matching IDM. No public weights yet.
+- **DreamDojo** — World model (not a VLA). Would need different probe design or pairing with action decoder.
 
 ### Architecture Comparison
 
-| Property | X-VLA | π0 | SmolVLA | OpenVLA |
-|----------|-------|----|---------|---------|
-| VLM backbone | InternVL2 (0.9B) | PaliGemma (3B) | SmolVLM2 (~0.5B) | Llama-2 + DINOv2 + SigLIP (7B) |
-| Action head | Flow matching (10-step) | Flow matching | Flow matching | Autoregressive text tokens |
-| Action space | Continuous | Continuous | Continuous | Discrete (text vocabulary) |
-| Cross-embodiment | ✅ Soft prompts | ✅ Multi-embodiment | ❌ Needs fine-tuning | ❌ Needs fine-tuning |
-| Stochastic actions | ✅ | ✅ | ✅ | ❌ (deterministic) |
-| VLM queryable | ❌ | ❌ | ❌ | ✅ (actions = text tokens) |
-
-### Architecture-Specific Probes
-
-| Probe | X-VLA | π0 | SmolVLA | OpenVLA |
-|-------|-------|-----|---------|---------|
-| VLM scene description | ❌ | ❌ | ❌ | ✅ unique |
-| Soft prompt inspection | ✅ unique | ❌ | ❌ | ❌ |
-| Action stochasticity | ✅ | ✅ | ✅ | ❌ |
-| Embodiment transfer | ✅ unique | ✅ | ❌ | ❌ |
+| Property | X-VLA | π0 | OpenVLA |
+|----------|-------|----|---------|
+| VLM backbone | InternVL2 (0.9B) | PaliGemma (3B) | Llama-2 + DINOv2 + SigLIP (7B) |
+| Action head | Flow matching (10-step) | Flow matching (10-step) | Autoregressive text tokens |
+| Action space | Continuous | Continuous | Discrete (256 bins/dim) |
+| Variance mechanism | Random seed (starting noise) | Random seed (starting noise) | Sampling temperature |
+| Temperature/seed | Seeds 0-9 | Seeds 0-9 | **T=0.5** |
+| Camera inputs | 2 (primary + secondary) | 2 (agentview + wrist) | 1 (single camera) |
+| Proprioception | Yes (8D state) | Yes (8D state) | No |
+| VLM queryable | ❌ | ❌ | ✅ (actions = text tokens) |
 
 ---
 
-## Tool Stack (Researched & Selected)
+## The Probing Suite
 
-### Leverage existing tools — minimal custom code needed (~200-500 lines)
+### 8 Diagnostic Probes
 
-| Layer | Tool | Why |
-|-------|------|-----|
-| **Framework** | **LeRobot** | Natively supports X-VLA, π0, SmolVLA. Built-in eval infrastructure. |
-| **Simulation** | **LIBERO** (primary) + **SimplerEnv** (WidowX) | Best model coverage. LIBERO has 4 task suites (spatial, object, goal, long) that map to our probes. |
-| **Attention/Attribution** | **Captum** + `output_attentions=True` | Model-agnostic. ~50 lines per model wrapper. |
-| **Trajectory Analysis** | **dtw-python** + **plotly** + **numpy** | DTW distance, L2 error, interactive 3D visualization. |
-| **Experiment Tracking** | **Weights & Biases** | Best comparison UI. Image/trajectory artifacts. Side-by-side panels. Already supported by LeRobot. |
-| **Reference Framework** | **RoboVLMs** | Most comprehensive existing VLA comparison (600+ experiments). Examine their eval code. |
+| # | Probe | What It Tests | Key Metric | Good Direction |
+|---|-------|--------------|------------|----------------|
+| 1 | **Baseline Trajectory** | Does the model reach for the correct object? | `direction_alignment` | ↑ Higher is better |
+| 2 | **Spatial Symmetry** | Does the model understand absolute vs relative positions? | `perturbation_sensitivity` | ↑ Higher is better |
+| 3 | **Camera Sensitivity** | Is spatial reasoning tied to camera pose? | `mirror_camera_sensitivity` | ↑ Higher is better |
+| 4 | **View Ablation** | Which camera views carry the most information? | `full_vision_ablation_sensitivity` | ↑ Higher is better |
+| 5 | **Counterfactual Prompts** | Does the language encoder collapse synonyms correctly? | `mean_synonym_sensitivity` | ↓ Lower is better |
+| 6 | **Null Action** | Can the model comply with "don't move"? | `null_vs_baseline_ratio` | ↓ Lower is better (0 = stays still) |
+| 7 | **Attention Visualization** | Is the model attending to the referenced object? | `mean_attention_iou` | ↑ Higher is better |
+| 8 | **Environment Perturbation** | Does the model re-plan when objects move? | `mean_perturbation_sensitivity` | ↑ Higher is better |
 
-### What We Build (Not Available Off-the-Shelf)
-1. **Probe harness** — unified interface to run each probe across all 4 models
-2. **Attention extraction wrappers** — per-model code to extract attention from the right layers (~50 lines each)
-3. **Perturbation generators** — camera/prompt perturbation pipeline
-4. **Metrics aggregation** — collect results into W&B tables for cross-model comparison
-5. **Model loading wrapper** — thin adapter per model for consistent `predict_action()` API
+### Variance Methodology
+
+**Flow matching models** (X-VLA, π0): Tested with multiple random seeds (default 10). Different seeds produce different starting noise for the denoising process.
+
+**Autoregressive models** (OpenVLA): Uses **sampling temperature = 0.5** to introduce controlled randomness in token selection. Temperature 0 would be fully deterministic.
+
+See dashboard About page for full educational explainer.
 
 ---
 
-## Evaluation Metrics
+## Results Summary
 
-### Quantitative (tracked in W&B)
+### Native Embodiment Results
 
-| # | Metric | What it measures | Applies to |
-|---|--------|-----------------|------------|
-| 1 | **L2 action error** | Euclidean distance between predicted and ground-truth actions (from dataset) | All models |
-| 2 | **Trajectory spread** | Action variance across 10+ random seeds | Flow matching models (X-VLA, π0, SmolVLA) |
-| 3 | **Perturbation sensitivity** | L2 delta in predicted action per variable change (prompt, camera, object position) | All models |
-| 4 | **Attention IoU** | Overlap between attention map and ground-truth object region | All models |
-| 5 | **Trajectory DTW** | Dynamic Time Warping distance between predicted and reference trajectories | All models |
-| 6 | **Trajectory smoothness** | Mean absolute jerk (3rd derivative of position) | All models |
+| Model | Embodiment | Direction Alignment | Spatial Sensitivity | Camera Sensitivity | Null Action Ratio | Attention IoU |
+|-------|-----------|-------------------|--------------------|--------------------|-------------------|---------------|
+| **X-VLA** | WidowX (native) | **0.87** | 0.002 | 0.056 | 1.0 | 0.09 |
+| **π0** | Franka (native) | **0.47** | 1.66 | 1.66 | ~1.0 | 0.0 |
+| **π0** | WidowX (cross) | -0.01 | 1.74 | 1.74 | ~1.0 | 0.0 |
+| **OpenVLA** | WidowX (native) | N/A* | 0.145 | 0.145 | ~1.0 | 0.11 |
 
-### Qualitative (logged as W&B artifacts)
-- Trajectory visualization (side-by-side per model per probe)
-- Attention map overlays on input images
-- Failure mode taxonomy (wrong object, wrong direction, random/noisy, frozen/minimal)
+*OpenVLA outputs single-step actions (chunk_size=1) with zero jerk — direction alignment metric not directly comparable.
 
-### Results Tracking Schema
+### Key Findings
 
-Each experiment logged to W&B with:
+1. **Embodiment match matters enormously**: π0 went from -0.01 (random) on WidowX to 0.47 (purposeful) on native Franka. This is the strongest result in the project.
+
+2. **No model shows null-action compliance**: All models produce similar displacement whether told "pick up the red block" or "don't move." None understand negation.
+
+3. **OpenVLA quantization dead zone**: The 256-bin discretization creates insensitivity to small perturbations. Synonym sensitivity = 0 (identical tokens for different phrasings). Block position shifts produce identical actions. This is architectural, not a bug.
+
+4. **Attention extraction is model-dependent**: Works for X-VLA (IoU 0.09) and OpenVLA (IoU 0.11), fails for π0 (returns zeros). Different architectures require different extraction strategies.
+
+5. **X-VLA has the best direction alignment** (0.87) but diffuse attention — it reaches for the right thing without clearly "looking" at it.
+
+### Experiment Audit
+
+Full methodology audit at `docs/experiment-audit.md`. Confidence levels:
+- **X-VLA**: High confidence — native embodiment, no workarounds
+- **π0**: Medium-high confidence — native Franka scene works well, some compatibility patches needed
+- **OpenVLA**: Medium confidence — temperature fix resolved determinism, but quantization effects dominate
+
+---
+
+## Scenes
+
+### MuJoCo Scenes Built
+
+| Scene | Robot | Cameras | State | Assets |
+|-------|-------|---------|-------|--------|
+| **WidowX** | WidowX 250s | "up" (over-shoulder) + "side" | 8D BridgeData format | `vla_probing/assets/widowx/` |
+| **Franka** | Franka Emika Panda | "agentview" (front) + "robot0_eye_in_hand" (wrist) | 8D LIBERO format | `vla_probing/assets/franka/` (MuJoCo Menagerie) |
+
+Both scenes include: table, red block, blue block, manipulable positions, matching camera conventions for their respective training datasets.
+
+---
+
+## Tool Stack
+
+| Layer | Tool | Status |
+|-------|------|--------|
+| **Framework** | LeRobot | ✅ Active |
+| **Simulation** | MuJoCo (WidowX + Franka scenes) | ✅ Active |
+| **Dashboard** | Streamlit (port 8502) | ✅ Active |
+| **Attention** | Model-specific hooks + Captum | ✅ Partial (fails for π0) |
+| **Trajectory Analysis** | dtw-python + plotly + numpy | ✅ Active |
+| **Experiment Tracking** | W&B (optional) + JSON results | ✅ Active |
+
+---
+
+## Project Structure
+
 ```
-{
-  model: str,           # "xvla" | "pi0" | "smolvla" | "openvla"
-  embodiment: str,      # "widowx" | "libero_franka" | "so100"
-  probe: str,           # "baseline" | "spatial_symmetry" | "camera_sensitivity" | ...
-  probe_variant: str,   # specific variant (e.g., "mirror_horizontal", "prompt_synonym_cube")
-  seed: int,
-  metrics: {
-    l2_error: float,
-    trajectory_dtw: float,
-    trajectory_jerk: float,
-    attention_iou: float,
-  },
-  artifacts: {
-    trajectory_plot: Image,
-    attention_map: Image,
-    raw_actions: Array,
-  }
-}
+vla_probing/
+├── adapter.py              # VLAAdapter interface
+├── adapters/
+│   ├── __init__.py
+│   ├── openvla.py          # OpenVLA-7B adapter (T=0.5 sampling)
+│   └── pi0.py              # π0 adapter (KV cache patch, SigLIP shim)
+├── assets/
+│   ├── widowx/             # WidowX MuJoCo scene
+│   └── franka/             # Franka Panda MuJoCo scene (from Menagerie)
+├── probes/
+│   ├── base.py             # Probe base class + factories
+│   ├── baseline.py         # Probe 1: Baseline trajectory
+│   ├── spatial_symmetry.py # Probe 2: Block position swap
+│   ├── camera_sensitivity.py # Probe 3: Camera mirror/flip
+│   ├── view_ablation.py    # Probe 4: Remove camera views
+│   ├── counterfactual.py   # Probe 5: Synonym prompts
+│   ├── null_action.py      # Probe 6: "Don't move" compliance
+│   ├── attention.py        # Probe 7: Attention map extraction
+│   ├── perturbation.py     # Probe 8: Block position shifts
+│   └── vlm_query.py        # Probe 9: VLM scene description (OpenVLA only)
+├── scene.py                # WidowXScene + FrankaScene classes
+├── metrics.py              # Shared metric computation
+├── tracking.py             # W&B experiment tracking
+├── dashboard.py            # Streamlit dashboard
+├── run_all.py              # Full suite runner
+└── __main__.py             # CLI entry point
+
+outputs/probes/
+├── probe_results_xvla_widowx.json
+├── probe_results_pi0_franka.json
+├── probe_results_pi0_widowx.json
+└── probe_results_openvla_widowx.json
+
+docs/
+├── vla-comparison-project.md   # This file
+├── experiment-audit.md         # Methodology audit report
+├── open-questions-research.md  # Research notes
+└── tools-research.md           # Tool selection research
 ```
 
 ---
 
-## Execution Plan
+## Execution History
 
-### Phase 1: X-VLA Baseline
-**Goal:** Reproduce Avik's probes locally with quantitative metrics
+### Phase 1: X-VLA Baseline ✅
+- Forked avikde/vla-pipeline, adapted for MPS
+- Built `vla_probing/` package with VLAAdapter interface
+- All 8 probes implemented and running
+- First results: direction alignment 0.87, diffuse attention (IoU 0.09)
+- Merged to main (commit `5c3ea53`)
 
-- Fork [avikde/vla-pipeline](https://github.com/avikde/vla-pipeline)
-- Adapt for MPS (swap CUDA → MPS, force `attn_implementation="eager"` for InternVL2)
-- CPU fallback if MPS is unstable — don't let MPS issues block research
-- Set up W&B project, define logging schema
-- Run all 8 probes on X-VLA WidowX
-- Add quantitative metrics (L2 error, trajectory spread, attention IoU)
-- Validate results match Avik's findings
+### Phase 2: Multi-Model Expansion ✅
+- π0 adapter with KV cache fix, attention mask patch, SigLIP shim
+- OpenVLA adapter with fp16 on MPS, VLM querying probe
+- SmolVLA adapter (later removed — no native sim environment)
+- All adapters tested with 8 probes on WidowX scene
+- Streamlit dashboard built (port 8502)
 
-### Phase 2: Probing Harness + π0
-**Goal:** Abstract probes into reusable harness, add second model
+### Phase 3: Native Embodiment Testing ✅
+- Downloaded Franka Panda from MuJoCo Menagerie
+- Built FrankaScene class with LIBERO-style cameras
+- Made probe runner scene-aware (`--scene widowx|franka`)
+- π0 on Franka: direction alignment jumped from -0.01 to 0.47
+- Removed SmolVLA (no SO-100 sim available)
 
-- Extract probe logic into model-agnostic functions
-- Define `VLAAdapter` interface (load, predict, get_attention)
-- Implement π0 adapter using `lerobot/pi0_libero_finetuned`
-- Set up LIBERO environment for π0 evaluation
-- Run full probe suite on π0
-- First cross-model comparison (X-VLA vs π0)
+### Phase 4: Methodology Validation ✅
+- Spawned audit agent — 14K-word methodology report
+- Fixed OpenVLA determinism (do_sample=True, temperature=0.5)
+- Added per-probe color normalization to dashboard (green=good, red=bad)
+- Added educational variance methodology explainer
+- Removed duplicate result files, added embodiment labels
 
-### Phase 3: SmolVLA + OpenVLA
-**Goal:** Complete the 4-model comparison
+### Phase 5: Analysis & Content (Next)
+- [ ] Cross-model comparison analysis with key insights
+- [ ] Blog post / writeup
+- [ ] Share with Avik De
+- [ ] Clean up old agent tmux sessions (6 idle)
 
-- SmolVLA adapter (smallest model, fast iteration)
-- OpenVLA adapter (fp16, careful memory management)
-- OpenVLA-specific probe: VLM scene querying ("what do you see?")
-- Run full probe suite on both
-- Cross-model comparison with all 4
-
-### Phase 4: Analysis & Content
-**Goal:** Produce publishable comparison
-
-- Side-by-side visualizations (probe × model grid)
-- Quantitative results tables from W&B
-- Architectural insights: what do different designs actually buy you?
-- Deployment implications: which failure modes matter for real robots?
-- Blog post draft
-- Share with Avik De, PI team, HuggingFace robotics team
+### Phase 6: Future Models (Planned)
+- [ ] GR00T N1.6 — try eager-attention on CPU/MPS, or use cloud GPU
+- [ ] mimic-video — when weights are released
+- [ ] Increase seed count (10 → 50) for more robust variance estimates
+- [ ] Add repeated trials per probe variant for confidence intervals
 
 ---
 
 ## Key Research Questions
 
-1. **Do different action representations (continuous flow matching vs text tokens) produce fundamentally different failure modes?**
-2. **Does model scale (0.5B → 7B) improve spatial understanding, or just task coverage?**
-3. **Are soft prompts (X-VLA) actually encoding embodiment-specific spatial reasoning, or just biases?**
-4. **Does any architecture show genuine null-action compliance (understanding "don't move")?**
-5. **How much of VLA behavior is spatial template matching (training distribution) vs actual scene understanding?**
+1. ✅ **Do different action representations produce fundamentally different failure modes?** — Yes. Flow matching models show stochastic variation; OpenVLA's discrete tokens create quantization dead zones. Fundamentally different failure signatures.
+
+2. 🔄 **Does model scale (0.9B → 7B) improve spatial understanding?** — Not clearly. X-VLA (0.9B) outperforms OpenVLA (7B) on direction alignment. Scale alone doesn't buy spatial understanding.
+
+3. 🔄 **Are soft prompts encoding embodiment-specific spatial reasoning?** — Partially supported. X-VLA's strong WidowX performance vs weak cross-embodiment transfer suggests embodiment encoding.
+
+4. ✅ **Does any architecture show genuine null-action compliance?** — No. All three models produce similar displacement regardless of "don't move" instructions. None understand negation.
+
+5. ✅ **How much is spatial template matching vs actual understanding?** — Mostly template matching. π0 goes from random to purposeful just by matching the visual domain. Models don't generalize spatial reasoning across embodiments.
 
 ---
 
-## Prior Art
+## References
 
-- **[RoboVLMs](https://robovlms.github.io)** — 600+ experiment VLA comparison framework (task success focus, not interpretability)
-- **[Avik De's VLA Pipeline](https://github.com/avikde/vla-pipeline)** — X-VLA probing notebook + MuJoCo WidowX scene
-- **[SimplerEnv](https://simpler-env.github.io/)** — Real-to-sim evaluation framework (CoRL 2024)
-- **[X-VLA paper](https://arxiv.org/abs/2510.10274)** — Compares X-VLA against OpenVLA, Octo on SimplerEnv + CALVIN + LIBERO
-- **[SmolVLA paper](https://arxiv.org/abs/2506.01844)** — Efficient VLA design for community hardware
-
-**What's novel about our work:** Nobody has done systematic *interpretability probing* across VLA architectures. Existing comparisons measure task success; we measure *what the models understand*.
-
----
-
-## Relationship to Existing Robot-Sim Project
-
-| | Robot-Sim (existing) | VLA Comparison (new) |
-|---|---|---|
-| **Focus** | Training policies from scratch | Understanding pretrained VLA behavior |
-| **Models** | ACT, Diffusion Policy | X-VLA, π0, SmolVLA, OpenVLA |
-| **Loop** | Closed-loop (train → evaluate in sim) | Open-loop (single-step probing) |
-| **Shared** | Same Mac mini, same PyTorch/lerobot stack |
-
-VLA comparison work goes in `vla-probing/` subdirectory of the robot-sim repo.
+- [Avik De — Debugging as Architecture Insight](https://www.avikde.me/p/debugging-as-architecture-insight)
+- [Avik De — The Architecture Behind "End-to-End" Robotics Pipelines](https://www.avikde.me/p/the-architecture-behind-end-to-end)
+- [X-VLA Paper (arXiv 2510.10274)](https://arxiv.org/abs/2510.10274)
+- [avikde/vla-pipeline (GitHub)](https://github.com/avikde/vla-pipeline)
+- [LeRobot (HuggingFace)](https://github.com/huggingface/lerobot)
+- [GR00T N1.6](https://github.com/NVIDIA/Isaac-GR00T) — NVIDIA's foundation VLA
+- [mimic-video](https://mimic-video.github.io/) — Video-Action Model (arXiv 2512.15692)
+- [DreamDojo](https://github.com/NVIDIA/DreamDojo) — Interactive world model (arXiv 2602.06949)
+- [RoboVLMs](https://robovlms.github.io/) — VLA comparison framework (task success focus)
 
 ---
 
-*v3 — 2026-02-26 (updated with council review, tools research, embodiment strategy)*
+*v4 — 2026-02-26 (updated with all completed phases, native embodiment results, methodology audit, future model roadmap)*
