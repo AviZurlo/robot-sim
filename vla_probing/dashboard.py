@@ -268,6 +268,58 @@ success rates. We measure *what the models understand*.
 
 ---
 
+### 🎲 How We Measure Variance: Flow Matching vs. Autoregressive
+
+These models generate actions in fundamentally different ways, which affects how we
+measure their confidence and consistency.
+
+#### Flow Matching (X-VLA, π0, SmolVLA)
+
+These models start from **random noise** and iteratively "denoise" it into an action,
+similar to how image diffusion models work. Think of it like starting with a page of
+random scribbles and gradually cleaning them up into a drawing.
+
+The **seed** controls which random noise you start with. Different seeds → different
+starting scribbles → slightly different final actions. No seed is inherently "better" —
+they're just different starting points. A robust model should produce similar actions
+regardless of which seed is used.
+
+We run each probe with **multiple seeds** (default: 10) to measure how much the model's
+output varies. High variance means the model is uncertain; low variance means it's
+confident in its prediction.
+
+#### Autoregressive / Discrete Tokens (OpenVLA)
+
+OpenVLA generates actions as **text tokens**, one at a time — like writing a sentence
+word by word. At each step, it picks from a set of 256 discrete bins per action dimension.
+
+The **sampling temperature** controls how "adventurous" the model is when picking tokens:
+- **Temperature = 0**: Always picks the highest-probability token → fully deterministic,
+  identical output every time
+- **Temperature = 0.5**: Occasionally picks less-likely-but-reasonable tokens →
+  some variance, good for measuring confidence
+- **Temperature = 1.0**: Picks more freely → more variance, but may produce noisier actions
+
+#### Our Setup
+
+| Model | Variance Mechanism | Setting | Samples per Probe |
+|-------|-------------------|---------|-------------------|
+| X-VLA | Flow matching seeds | Seeds 0–9 | 10 |
+| π0 | Flow matching seeds | Seeds 0–9 | 10 |
+| SmolVLA | Flow matching seeds | Seeds 0–9 | 10 |
+| OpenVLA | Sampling temperature | **T = 0.5** | 10 |
+
+We chose **temperature 0.5** for OpenVLA as a balance: enough randomness to reveal
+the model's uncertainty distribution, but not so much that actions become unreasonably
+noisy. This is consistent with values used in the robotics literature (typically 0.3–0.7).
+
+⚠️ **Note:** OpenVLA's 256-bin discretization also creates a "quantization dead zone" —
+small input changes (camera shifts, prompt synonyms, minor position changes) may not
+cross bin boundaries, producing identical discrete outputs even with temperature > 0.
+This is a fundamental architectural property, not a bug.
+
+---
+
 **References:**
 - [Avik De — Debugging as Architecture Insight](https://www.avikde.me/p/debugging-as-architecture-insight)
 - [Avik De — The Architecture Behind "End-to-End" Robotics Pipelines](https://www.avikde.me/p/the-architecture-behind-end-to-end)
@@ -414,6 +466,18 @@ elif page == "Overview":
                 "What it measures": info.get("metric_explanation", ""),
             })
         st.table(pd.DataFrame(legend_rows).set_index("Probe"))
+
+    # Methodology note
+    with st.expander("🎲 Variance methodology"):
+        st.markdown(
+            "**Flow matching models** (X-VLA, π0, SmolVLA) are tested with 10 random seeds "
+            "to measure output variance. Different seeds produce different random starting noise "
+            "for the denoising process.\n\n"
+            "**Autoregressive models** (OpenVLA) use **sampling temperature = 0.5** to introduce "
+            "controlled randomness in token selection. Temperature 0 would be fully deterministic; "
+            "0.5 balances variance measurement with action quality.\n\n"
+            "See the **About** page for a full explanation of these mechanisms."
+        )
 
     # ----- Awaiting results -----
     all_model_keys = ["xvla", "pi0", "smolvla", "openvla"]
