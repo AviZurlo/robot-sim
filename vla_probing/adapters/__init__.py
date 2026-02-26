@@ -3,4 +3,11 @@
 from vla_probing.adapters.openvla import OpenVLAAdapter
 from vla_probing.adapters.pi0 import Pi0Adapter
 
-__all__ = ["OpenVLAAdapter", "Pi0Adapter"]
+# Cosmos Policy requires CUDA — import is conditional to avoid
+# breaking MPS-only environments
+try:
+    from vla_probing.adapters.cosmos_policy import CosmosPolicyAdapter
+except ImportError:
+    CosmosPolicyAdapter = None
+
+__all__ = ["OpenVLAAdapter", "Pi0Adapter", "CosmosPolicyAdapter"]

@@ -451,6 +451,7 @@ _MODEL_DEFAULT_SCENE = {
     "pi0": "franka",
     "xvla": "widowx",
     "openvla": "widowx",
+    "cosmos_policy": "franka",
 }
 
 

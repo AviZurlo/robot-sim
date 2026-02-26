@@ -101,6 +101,7 @@ MODEL_COLORS = {
     "xvla": "#636EFA",
     "pi0": "#EF553B",
     "openvla": "#AB63FA",
+    "cosmos_policy": "#FFA15A",
 }
 
 # Scene suffixes get a lighter shade
@@ -113,6 +114,7 @@ MODEL_DISPLAY = {
     "xvla": "X-VLA",
     "pi0": "Pi0",
     "openvla": "OpenVLA",
+    "cosmos_policy": "Cosmos Policy",
 }
 
 SCENE_DISPLAY = {
@@ -514,7 +516,7 @@ elif page == "Overview":
 
     # ----- Awaiting results -----
     base_models_present = {_parse_result_key("probe_results_" + m)[1] for m in model_names}
-    all_base_models = ["xvla", "pi0", "openvla"]
+    all_base_models = ["xvla", "pi0", "openvla", "cosmos_policy"]
     missing = [m for m in all_base_models if m not in base_models_present]
     if missing:
         st.caption(
