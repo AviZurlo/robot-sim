@@ -36,5 +36,8 @@ openvla = [
     "scipy",
 ]
 
+[tool.setuptools.packages.find]
+include = ["vla_probing*", "lerobot_cache*", "scripts*"]
+
 [project.scripts]
 lerobot-cache = "lerobot_cache.cli:main"
