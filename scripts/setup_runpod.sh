@@ -5,9 +5,12 @@ set -euo pipefail
 
 echo "=== Cosmos Policy RunPod Setup ==="
 
-# 1. Install our project deps
-echo "Installing robot-sim dependencies..."
-pip install -e ".[vla-probing]"
+# 0. Upgrade pip to avoid build issues
+pip install --upgrade pip setuptools
+
+# 1. Install minimal deps (not the full project — just what probes need)
+echo "Installing minimal probe dependencies..."
+pip install -r requirements-runpod.txt
 
 # 2. Clone and install Cosmos Policy
 COSMOS_DIR="/workspace/cosmos-policy"
@@ -22,17 +25,18 @@ pip install -e .
 
 # 3. Install CUDA-specific deps that Cosmos needs
 echo "Installing flash-attn and triton..."
-pip install flash-attn --no-build-isolation 2>/dev/null || echo "flash-attn install may need manual intervention"
-pip install triton
+pip install flash-attn --no-build-isolation 2>/dev/null || echo "WARNING: flash-attn install failed — may already be present or need manual install"
+pip install triton 2>/dev/null || echo "WARNING: triton install failed — may already be present"
 
 # 4. Verify CUDA is available
+cd /workspace/robot-sim
 python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}'); print(f'GPU: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else \"none\"}')"
 
-# 5. Verify Cosmos Policy is importable
-cd /workspace/robot-sim
+# 5. Verify imports work
 python -c "
 import sys
 sys.path.insert(0, '/workspace/cosmos-policy')
+import mujoco; print(f'MuJoCo: {mujoco.__version__}')
 from cosmos_policy.experiments.robot.libero.run_libero_eval import PolicyEvalConfig
 print('Cosmos Policy imported successfully!')
 "
