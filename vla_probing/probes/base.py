@@ -126,6 +126,7 @@ def common_args(description: str) -> argparse.ArgumentParser:
     """Create argument parser with common probe arguments."""
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument(
+        "--model", default="xvla", choices=["xvla", "pi0", "openvla"], help="VLA model to probe"
     )
     parser.add_argument(
         "--scene", default="auto", choices=["auto", "widowx", "franka"],
