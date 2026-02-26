@@ -8,6 +8,7 @@ import numpy as np
 
 from vla_probing.adapter import VLAAdapter, VLAInput, XVLAAdapter
 from vla_probing.adapters.openvla import OpenVLAAdapter
+from vla_probing.adapters.openvla_oft import OpenVLAOFTAdapter
 from vla_probing.adapters.pi0 import Pi0Adapter
 from vla_probing.metrics import compute_all_metrics
 from vla_probing.scene import Scene, WidowXScene, make_scene, default_scene_for_model
@@ -116,6 +117,7 @@ def make_adapter(model: str = "xvla", device: str = "mps") -> VLAAdapter:
         "xvla": XVLAAdapter,
         "pi0": Pi0Adapter,
         "openvla": OpenVLAAdapter,
+        "openvla_oft": OpenVLAOFTAdapter,
         "cosmos_policy": CosmosPolicyAdapter,
     }
     if model not in adapters:
@@ -129,7 +131,7 @@ def common_args(description: str) -> argparse.ArgumentParser:
     """Create argument parser with common probe arguments."""
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument(
-        "--model", default="xvla", choices=["xvla", "pi0", "openvla", "cosmos_policy"], help="VLA model to probe"
+        "--model", default="xvla", choices=["xvla", "pi0", "openvla", "openvla_oft", "cosmos_policy"], help="VLA model to probe"
     )
     parser.add_argument(
         "--scene", default="auto", choices=["auto", "widowx", "franka"],
