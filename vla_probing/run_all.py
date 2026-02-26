@@ -2,15 +2,15 @@
 
 Usage:
     python -m vla_probing.run_all --model xvla --device mps
+    python -m vla_probing.run_all --model pi0 --scene franka
     python -m vla_probing.run_all --model xvla --wandb  # with W&B logging
 """
 
-import argparse
 import json
 import time
 from pathlib import Path
 
-from vla_probing.probes.base import common_args, make_adapter
+from vla_probing.probes.base import common_args, make_adapter, resolve_scene
 from vla_probing.probes.baseline import BaselineProbe
 from vla_probing.probes.spatial_symmetry import SpatialSymmetryProbe
 from vla_probing.probes.camera_sensitivity import CameraSensitivityProbe
@@ -20,7 +20,6 @@ from vla_probing.probes.null_action import NullActionProbe
 from vla_probing.probes.attention import AttentionProbe
 from vla_probing.probes.perturbation import PerturbationProbe
 from vla_probing.probes.vlm_query import VLMQueryProbe
-from vla_probing.scene import WidowXScene
 from vla_probing.tracking import ExperimentTracker
 
 
@@ -57,14 +56,16 @@ def main() -> None:
 
     print(f"Loading model: {args.model} on {args.device}...")
     adapter = make_adapter(args.model, args.device)
-    scene = WidowXScene()
+    scene = resolve_scene(args)
+    scene_name = scene.scene_name
+    print(f"Using scene: {scene_name}")
     tracker = ExperimentTracker(enabled=args.wandb)
 
     if args.wandb:
         tracker.init_run(
-            name=f"all_probes_{args.model}",
+            name=f"all_probes_{args.model}_{scene_name}",
             config=vars(args),
-            tags=[args.model, "full_suite"],
+            tags=[args.model, scene_name, "full_suite"],
         )
 
     # Add VLM query probe for OpenVLA
@@ -111,15 +112,16 @@ def main() -> None:
             import traceback
             traceback.print_exc()
 
-    # Save results summary
-    summary_path = output_dir / f"probe_results_{args.model}.json"
+    # Save results with model_scene naming
+    result_filename = f"probe_results_{args.model}_{scene_name}.json"
+    summary_path = output_dir / result_filename
     with open(summary_path, "w") as f:
         json.dump(all_results, f, indent=2, default=str)
     print(f"\n\nResults saved to {summary_path}")
 
     # Print summary table
     print(f"\n{'='*60}")
-    print(f"SUMMARY — {args.model}")
+    print(f"SUMMARY — {args.model} ({scene_name})")
     print(f"{'='*60}")
     for name, data in all_results.items():
         status = "OK" if "metrics" in data else "FAILED"

@@ -1,0 +1,78 @@
+<mujoco model="franka_vision_scene">
+  <!-- Franka Panda robot (MuJoCo Menagerie) -->
+  <include file="panda.xml"/>
+
+  <option gravity="0 0 -9.81" timestep="0.002"/>
+
+  <statistic center="0.4 0 0.4" extent="1"/>
+
+  <visual>
+    <headlight ambient="0.5 0.5 0.5" diffuse="0.6 0.6 0.6"/>
+    <global offwidth="640" offheight="480"/>
+  </visual>
+
+  <asset>
+    <texture name="grid" type="2d" builtin="checker" rgb1="0.2 0.2 0.2" rgb2="0.3 0.3 0.3" width="512" height="512"/>
+    <material name="grid" texture="grid" texrepeat="2 2"/>
+    <texture name="wood" type="2d" builtin="flat" rgb1="0.55 0.35 0.2" width="64" height="64"/>
+    <material name="table_mat" texture="wood" rgba="0.6 0.4 0.25 1"/>
+  </asset>
+
+  <worldbody>
+    <!-- Floor well below the table -->
+    <geom name="floor" pos="0 0 -0.5" size="2 2 0.05" type="plane" material="grid"/>
+
+    <!-- Lighting -->
+    <light pos="0.5 0.0 1.5" dir="0 0 -1" diffuse="0.8 0.8 0.8"/>
+    <light pos="0.0 0.5 1.2" dir="0 0 -1" diffuse="0.4 0.4 0.4"/>
+    <light pos="0.5 -0.5 1.0" dir="0 0 -1" diffuse="0.3 0.3 0.3"/>
+
+    <!-- Table surface at z=0 (robot base is at z=0 from included panda.xml) -->
+    <geom name="table_top" type="box" pos="0.4 0.0 -0.02" size="0.5 0.4 0.02" material="table_mat"/>
+    <!-- Table legs -->
+    <geom name="leg1" type="cylinder" pos="0.05 -0.3 -0.27" size="0.025 0.23" rgba="0.4 0.4 0.4 1"/>
+    <geom name="leg2" type="cylinder" pos="0.05 0.3 -0.27" size="0.025 0.23" rgba="0.4 0.4 0.4 1"/>
+    <geom name="leg3" type="cylinder" pos="0.75 -0.3 -0.27" size="0.025 0.23" rgba="0.4 0.4 0.4 1"/>
+    <geom name="leg4" type="cylinder" pos="0.75 0.3 -0.27" size="0.025 0.23" rgba="0.4 0.4 0.4 1"/>
+
+    <!-- Red block on table surface (z=0.02 = table_top + half block height) -->
+    <body name="red_block" pos="0.5 0.1 0.02">
+      <geom name="red_block_geom" type="box" size="0.02 0.02 0.02" rgba="0.8 0.1 0.1 1" mass="0.05"/>
+      <freejoint/>
+    </body>
+
+    <!-- Blue block on table surface -->
+    <body name="blue_block" pos="0.5 -0.1 0.02">
+      <geom name="blue_block_geom" type="box" size="0.02 0.02 0.02" rgba="0.1 0.1 0.8 1"/>
+    </body>
+
+    <!-- ==================== CAMERAS ==================== -->
+
+    <!-- "agentview" — LIBERO primary: front-facing, ~45° elevation, views workspace -->
+    <camera name="agentview"
+            pos="1.0 0.0 0.6"
+            xyaxes="0 -1 0 0.45 0 0.9"
+            mode="fixed"/>
+
+    <!-- "robot0_eye_in_hand" — LIBERO wrist camera: positioned near default EE location.
+         In the real LIBERO env this camera moves with the hand. For static probing
+         scenes (arm doesn't move) this fixed approximation is sufficient.
+         FrankaScene updates this camera's pose to match the hand body before rendering. -->
+    <camera name="robot0_eye_in_hand"
+            pos="0.55 0.0 0.45"
+            xyaxes="0 -1 0 -1 0 0"
+            mode="fixed"/>
+
+    <!-- Debug overview camera -->
+    <camera name="third_person"
+            pos="1.2 0.8 0.7"
+            xyaxes="-0.8 0.6 0 -0.3 -0.4 1"
+            mode="fixed"/>
+  </worldbody>
+
+  <!-- Sensors to read gripper pose (position + quaternion) -->
+  <sensor>
+    <framepos name="ee_pos" objtype="body" objname="hand"/>
+    <framequat name="ee_quat" objtype="body" objname="hand"/>
+  </sensor>
+</mujoco>

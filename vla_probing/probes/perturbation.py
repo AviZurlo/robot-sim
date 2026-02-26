@@ -11,22 +11,20 @@ import numpy as np
 from vla_probing.metrics import perturbation_sensitivity
 from vla_probing.tracking import ProbeResult
 
-from .base import Probe, common_args, make_adapter
-from vla_probing.scene import (
-    RED_BLOCK_DEFAULT_POS,
-    WidowXScene,
-)
+from .base import Probe, common_args, make_adapter, resolve_scene
 from vla_probing.tracking import ExperimentTracker
 
-# Perturbation positions for the red block
-PERTURBATION_POSITIONS = {
-    "default": RED_BLOCK_DEFAULT_POS.copy(),
-    "shifted_left": RED_BLOCK_DEFAULT_POS + np.array([0.0, 0.08, 0.0]),
-    "shifted_right": RED_BLOCK_DEFAULT_POS + np.array([0.0, -0.08, 0.0]),
-    "shifted_forward": RED_BLOCK_DEFAULT_POS + np.array([0.05, 0.0, 0.0]),
-    "shifted_back": RED_BLOCK_DEFAULT_POS + np.array([-0.05, 0.0, 0.0]),
-    "raised": RED_BLOCK_DEFAULT_POS + np.array([0.0, 0.0, 0.05]),
-}
+
+def _perturbation_positions(default_pos: np.ndarray) -> dict[str, np.ndarray]:
+    """Build perturbation positions relative to the scene's default block pos."""
+    return {
+        "default": default_pos.copy(),
+        "shifted_left": default_pos + np.array([0.0, 0.08, 0.0]),
+        "shifted_right": default_pos + np.array([0.0, -0.08, 0.0]),
+        "shifted_forward": default_pos + np.array([0.05, 0.0, 0.0]),
+        "shifted_back": default_pos + np.array([-0.05, 0.0, 0.0]),
+        "raised": default_pos + np.array([0.0, 0.0, 0.05]),
+    }
 
 
 class PerturbationProbe(Probe):
@@ -41,6 +39,11 @@ class PerturbationProbe(Probe):
 
         # 1. Get baseline trajectory
         self.scene.reset()
+        default_pos = self.scene.get_block_pos("red")
+        if default_pos is None:
+            raise RuntimeError("Red block not found in scene")
+        positions = _perturbation_positions(default_pos)
+
         baseline_actions, baseline_views = self._predict(prompt)
         baseline_2d = np.atleast_2d(baseline_actions).reshape(
             -1, baseline_actions.shape[-1]
@@ -49,7 +52,7 @@ class PerturbationProbe(Probe):
 
         # 2. Run perturbations
         perturbation_results = {}
-        for name, pos in PERTURBATION_POSITIONS.items():
+        for name, pos in positions.items():
             if name == "default":
                 continue
 
@@ -72,7 +75,7 @@ class PerturbationProbe(Probe):
             perturbation_results[name] = {
                 "sensitivity": sensitivity,
                 "endpoint_to_block": endpoint_to_block,
-                "block_displacement": float(np.linalg.norm(pos - RED_BLOCK_DEFAULT_POS)),
+                "block_displacement": float(np.linalg.norm(pos - default_pos)),
                 "traj_xyz": traj_xyz,
             }
 
@@ -116,7 +119,7 @@ def main() -> None:
     args = parser.parse_args()
 
     adapter = make_adapter(args.model, args.device)
-    scene = WidowXScene()
+    scene = resolve_scene(args)
     tracker = ExperimentTracker(enabled=args.wandb)
 
     if args.wandb:

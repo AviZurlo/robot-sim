@@ -96,12 +96,18 @@ PROBE_INFO = {
     },
 }
 
-# Consistent color palette for models
+# Consistent color palette for models (base model -> color)
 MODEL_COLORS = {
     "xvla": "#636EFA",
     "pi0": "#EF553B",
     "smolvla": "#00CC96",
     "openvla": "#AB63FA",
+}
+
+# Scene suffixes get a lighter shade
+SCENE_COLOR_VARIANTS = {
+    "franka": 0,     # primary shade
+    "widowx": 1,     # secondary shade
 }
 
 MODEL_DISPLAY = {
@@ -110,6 +116,14 @@ MODEL_DISPLAY = {
     "smolvla": "SmolVLA",
     "openvla": "OpenVLA",
 }
+
+SCENE_DISPLAY = {
+    "franka": "Franka",
+    "widowx": "WidowX",
+}
+
+# Known scene suffixes for parsing result filenames
+KNOWN_SCENES = {"franka", "widowx"}
 
 
 # ---------------------------------------------------------------------------
@@ -125,16 +139,31 @@ st.set_page_config(
 # ---------------------------------------------------------------------------
 # Data loading
 # ---------------------------------------------------------------------------
+def _parse_result_key(stem: str) -> tuple[str, str, str]:
+    """Parse a result filename stem into (key, base_model, scene).
+
+    Examples:
+        probe_results_pi0_franka -> ("pi0_franka", "pi0", "franka")
+        probe_results_pi0        -> ("pi0", "pi0", "")
+        probe_results_xvla       -> ("xvla", "xvla", "")
+    """
+    name = stem.replace("probe_results_", "")
+    parts = name.rsplit("_", 1)
+    if len(parts) == 2 and parts[1] in KNOWN_SCENES:
+        return name, parts[0], parts[1]
+    return name, name, ""
+
+
 @st.cache_data(ttl=30)
 def load_all_results() -> dict[str, dict]:
-    """Load probe results for all available models."""
+    """Load probe results for all available models/scenes."""
     results = {}
     if not PROBES_DIR.exists():
         return results
     for f in sorted(PROBES_DIR.glob("probe_results_*.json")):
-        model_name = f.stem.replace("probe_results_", "")
+        key, _, _ = _parse_result_key(f.stem)
         with open(f) as fp:
-            results[model_name] = json.load(fp)
+            results[key] = json.load(fp)
     return results
 
 
@@ -143,12 +172,20 @@ def get_model_meta(data: dict) -> dict:
     return data.get("_meta", {})
 
 
-def get_model_color(model: str) -> str:
-    return MODEL_COLORS.get(model, "#888888")
+def get_model_color(key: str) -> str:
+    """Get color for a model key (e.g. 'pi0_franka' -> pi0 color)."""
+    _, base, _ = _parse_result_key("probe_results_" + key)
+    return MODEL_COLORS.get(base, "#888888")
 
 
-def get_model_display(model: str) -> str:
-    return MODEL_DISPLAY.get(model, model.upper())
+def get_model_display(key: str) -> str:
+    """Get display name (e.g. 'pi0_franka' -> 'Pi0 (Franka)')."""
+    _, base, scene = _parse_result_key("probe_results_" + key)
+    base_display = MODEL_DISPLAY.get(base, base.upper())
+    if scene:
+        scene_display = SCENE_DISPLAY.get(scene, scene.title())
+        return f"{base_display} ({scene_display})"
+    return base_display
 
 
 # ---------------------------------------------------------------------------
@@ -416,12 +453,13 @@ elif page == "Overview":
         st.table(pd.DataFrame(legend_rows).set_index("Probe"))
 
     # ----- Awaiting results -----
-    all_model_keys = ["xvla", "pi0", "smolvla", "openvla"]
-    missing = [m for m in all_model_keys if m not in model_names]
+    base_models_present = {_parse_result_key("probe_results_" + m)[1] for m in model_names}
+    all_base_models = ["xvla", "pi0", "smolvla", "openvla"]
+    missing = [m for m in all_base_models if m not in base_models_present]
     if missing:
         st.caption(
             "Awaiting results for: "
-            + ", ".join(get_model_display(m) for m in missing)
+            + ", ".join(MODEL_DISPLAY.get(m, m.upper()) for m in missing)
         )
 
     # ----- Radar / spider chart comparing models -----

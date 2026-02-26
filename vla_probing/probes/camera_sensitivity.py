@@ -11,8 +11,7 @@ import numpy as np
 from vla_probing.metrics import perturbation_sensitivity
 from vla_probing.tracking import ProbeResult
 
-from .base import Probe, common_args, make_adapter
-from vla_probing.scene import WidowXScene
+from .base import Probe, common_args, make_adapter, resolve_scene
 from vla_probing.tracking import ExperimentTracker
 
 
@@ -36,7 +35,7 @@ class CameraSensitivityProbe(Probe):
 
         # 2. Mirrored camera prediction
         self.scene.reset()
-        self.scene.mirror_camera("up")
+        self.scene.mirror_camera()
         mirrored_actions, mirrored_views = self._predict(prompt)
         mirrored_2d = np.atleast_2d(mirrored_actions).reshape(
             -1, mirrored_actions.shape[-1]
@@ -44,7 +43,7 @@ class CameraSensitivityProbe(Probe):
         mirrored_xyz = mirrored_2d[:, :3]
 
         # Reset camera
-        self.scene.reset_camera("up")
+        self.scene.reset_camera()
 
         # 3. Software-mirrored image (flip image but keep camera normal)
         self.scene.reset()
@@ -94,7 +93,7 @@ def main() -> None:
     args = parser.parse_args()
 
     adapter = make_adapter(args.model, args.device)
-    scene = WidowXScene()
+    scene = resolve_scene(args)
     tracker = ExperimentTracker(enabled=args.wandb)
 
     if args.wandb:

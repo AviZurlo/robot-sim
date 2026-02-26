@@ -11,7 +11,7 @@ from vla_probing.adapters.openvla import OpenVLAAdapter
 from vla_probing.adapters.pi0 import Pi0Adapter
 from vla_probing.adapters.smolvla import SmolVLAAdapter
 from vla_probing.metrics import compute_all_metrics
-from vla_probing.scene import WidowXScene
+from vla_probing.scene import Scene, WidowXScene, make_scene, default_scene_for_model
 from vla_probing.tracking import ExperimentTracker, ProbeResult
 
 
@@ -24,7 +24,7 @@ class Probe(ABC):
     def __init__(
         self,
         adapter: VLAAdapter,
-        scene: WidowXScene,
+        scene: Scene,
         tracker: ExperimentTracker | None = None,
     ) -> None:
         self.adapter = adapter
@@ -38,7 +38,7 @@ class Probe(ABC):
     def _predict(
         self,
         prompt: str,
-        scene: WidowXScene | None = None,
+        scene: Scene | None = None,
     ) -> tuple[np.ndarray, dict[str, np.ndarray]]:
         """Run VLA prediction on the current scene.
 
@@ -97,7 +97,7 @@ class Probe(ABC):
 
         result = ProbeResult(
             model=self.adapter.model_name,
-            embodiment="widowx",
+            embodiment=getattr(self.scene, "scene_name", "widowx"),
             probe=self.name,
             probe_variant=variant,
             seed=seed,
@@ -131,6 +131,10 @@ def common_args(description: str) -> argparse.ArgumentParser:
         "--model", default="xvla", choices=["xvla", "pi0", "smolvla", "openvla"], help="VLA model to probe"
     )
     parser.add_argument(
+        "--scene", default="auto", choices=["auto", "widowx", "franka"],
+        help="Scene to use (default: auto based on model)",
+    )
+    parser.add_argument(
         "--device", default="mps", choices=["mps", "cpu", "cuda"], help="Device"
     )
     parser.add_argument("--seed", type=int, default=0, help="Random seed")
@@ -141,3 +145,11 @@ def common_args(description: str) -> argparse.ArgumentParser:
         "--n-seeds", type=int, default=10, help="Number of seeds for stochasticity"
     )
     return parser
+
+
+def resolve_scene(args) -> "Scene":
+    """Resolve the scene from parsed args (handles 'auto')."""
+    scene_name = args.scene
+    if scene_name == "auto":
+        scene_name = default_scene_for_model(args.model)
+    return make_scene(scene_name)
