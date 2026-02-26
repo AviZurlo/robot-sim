@@ -62,9 +62,17 @@ class OpenVLAAdapter(VLAAdapter):
         - No proprioception input used
         - 7-DoF action output (not 20D packed timesteps)
         - 1 action step per inference (not 30-step chunks)
-        - Deterministic output (no flow matching stochasticity)
+        - Sampling temperature controls stochasticity (not flow matching seeds)
         - Can generate free-form text (VLM querying)
+
+    Sampling: We use temperature=0.5 with do_sample=True to enable
+    variance measurement. Temperature=0 would be fully deterministic,
+    collapsing all stochasticity. See dashboard About page for details.
     """
+
+    # Sampling temperature for action token generation.
+    # 0.5 balances variance measurement with action quality.
+    DEFAULT_TEMPERATURE = 0.5
 
     model_name = "openvla"
 
@@ -181,7 +189,8 @@ class OpenVLAAdapter(VLAAdapter):
             action = self.model.predict_action(
                 **inputs,
                 unnorm_key="bridge_orig",
-                do_sample=False,
+                do_sample=True,
+                temperature=self.DEFAULT_TEMPERATURE,
             )
 
         # Reshape to (1, 7) to match VLAOutput convention (chunk_size, action_dim)
@@ -223,7 +232,8 @@ class OpenVLAAdapter(VLAAdapter):
             generated_ids = self.model.generate(
                 **inputs,
                 max_new_tokens=max_new_tokens,
-                do_sample=False,
+                do_sample=True,
+                temperature=self.DEFAULT_TEMPERATURE,
             )
 
         # Decode only the new tokens (skip the input)
