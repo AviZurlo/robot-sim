@@ -19,10 +19,9 @@ from typing import Any
 import numpy as np
 
 from vla_probing.adapter import VLAInput
-from vla_probing.scene import WidowXScene
 from vla_probing.tracking import ExperimentTracker, ProbeResult
 
-from .base import Probe, common_args, make_adapter
+from .base import Probe, common_args, make_adapter, resolve_scene
 
 
 # VLM query prompts organized by category
@@ -134,7 +133,7 @@ def main() -> None:
         return
 
     adapter = make_adapter(args.model, args.device)
-    scene = WidowXScene()
+    scene = resolve_scene(args)
     tracker = ExperimentTracker(enabled=args.wandb)
 
     if args.wandb:

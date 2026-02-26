@@ -11,8 +11,7 @@ import numpy as np
 from vla_probing.metrics import perturbation_sensitivity
 from vla_probing.tracking import ProbeResult
 
-from .base import Probe, common_args, make_adapter
-from vla_probing.scene import WidowXScene
+from .base import Probe, common_args, make_adapter, resolve_scene
 from vla_probing.tracking import ExperimentTracker
 
 # Prompt groups: each group should produce similar actions
@@ -105,7 +104,7 @@ def main() -> None:
     args = parser.parse_args()
 
     adapter = make_adapter(args.model, args.device)
-    scene = WidowXScene()
+    scene = resolve_scene(args)
     tracker = ExperimentTracker(enabled=args.wandb)
 
     if args.wandb:
