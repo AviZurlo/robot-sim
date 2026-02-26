@@ -19,6 +19,7 @@ from vla_probing.probes.counterfactual import CounterfactualProbe
 from vla_probing.probes.null_action import NullActionProbe
 from vla_probing.probes.attention import AttentionProbe
 from vla_probing.probes.perturbation import PerturbationProbe
+from vla_probing.probes.vlm_query import VLMQueryProbe
 from vla_probing.scene import WidowXScene
 from vla_probing.tracking import ExperimentTracker
 
@@ -66,13 +67,18 @@ def main() -> None:
             tags=[args.model, "full_suite"],
         )
 
+    # Add VLM query probe for OpenVLA
+    all_probes = list(ALL_PROBES)
+    if args.model == "openvla":
+        all_probes.append(VLMQueryProbe)
+
     # Filter probes if specified
-    probes_to_run = ALL_PROBES
+    probes_to_run = all_probes
     if args.probes:
         probe_names = set(args.probes)
-        probes_to_run = [p for p in ALL_PROBES if p.name in probe_names]
+        probes_to_run = [p for p in all_probes if p.name in probe_names]
         if not probes_to_run:
-            print(f"No matching probes. Available: {[p.name for p in ALL_PROBES]}")
+            print(f"No matching probes. Available: {[p.name for p in all_probes]}")
             return
 
     # Run probes
