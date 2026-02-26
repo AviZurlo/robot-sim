@@ -7,7 +7,7 @@ echo "=== Cosmos Policy RunPod Setup ==="
 
 # 1. Install our project deps
 echo "Installing robot-sim dependencies..."
-pip install -r requirements.txt
+pip install -e ".[vla-probing]"
 
 # 2. Clone and install Cosmos Policy
 COSMOS_DIR="/workspace/cosmos-policy"
