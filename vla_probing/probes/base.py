@@ -111,12 +111,14 @@ class Probe(ABC):
 def make_adapter(model: str = "xvla", device: str = "mps") -> VLAAdapter:
     """Factory to create a VLA adapter by model name."""
     from vla_probing.adapters.cosmos_policy import CosmosPolicyAdapter
+    from vla_probing.adapters.groot import GR00TAdapter
 
     adapters = {
         "xvla": XVLAAdapter,
         "pi0": Pi0Adapter,
         "openvla": OpenVLAAdapter,
         "cosmos_policy": CosmosPolicyAdapter,
+        "groot": GR00TAdapter,
     }
     if model not in adapters:
         raise ValueError(f"Unknown model: {model}. Available: {list(adapters.keys())}")
@@ -129,7 +131,7 @@ def common_args(description: str) -> argparse.ArgumentParser:
     """Create argument parser with common probe arguments."""
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument(
-        "--model", default="xvla", choices=["xvla", "pi0", "openvla", "cosmos_policy"], help="VLA model to probe"
+        "--model", default="xvla", choices=["xvla", "pi0", "openvla", "cosmos_policy", "groot"], help="VLA model to probe"
     )
     parser.add_argument(
         "--scene", default="auto", choices=["auto", "widowx", "franka"],

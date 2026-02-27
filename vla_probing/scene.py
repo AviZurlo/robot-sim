@@ -452,6 +452,7 @@ _MODEL_DEFAULT_SCENE = {
     "xvla": "widowx",
     "openvla": "widowx",
     "cosmos_policy": "franka",
+    "groot": "franka",
 }
 
 
