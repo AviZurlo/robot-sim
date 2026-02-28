@@ -330,6 +330,13 @@ class FrankaScene:
             gripper_pos,
         ])
 
+    def get_joint_state(self) -> np.ndarray:
+        """Get joint-space state: 7 arm joints + 2 gripper fingers = 9D.
+
+        This matches LIBERO/robosuite's proprio format used by Cosmos Policy.
+        """
+        return self.data.qpos[:9].copy()
+
     def set_red_block_pos(self, pos: np.ndarray) -> None:
         """Move the red block to a new position."""
         if self._red_block_body < 0:

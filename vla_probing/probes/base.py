@@ -45,12 +45,20 @@ class Probe(ABC):
         """
         s = scene or self.scene
         views = s.render_all_views()
-        ee_state = s.get_ee_state()
+
+        # Use joint-space state if adapter needs it (e.g., Cosmos Policy)
+        # and the scene supports it; otherwise fall back to EE state.
+        if (hasattr(self.adapter, 'use_joint_state') and
+                self.adapter.use_joint_state and
+                hasattr(s, 'get_joint_state')):
+            proprio = s.get_joint_state()
+        else:
+            proprio = s.get_ee_state()
 
         inp = VLAInput(
             images=[views["image"], views["image2"]],
             prompt=prompt,
-            proprio=ee_state,
+            proprio=proprio,
         )
 
         self.adapter.reset()
@@ -66,11 +74,18 @@ class Probe(ABC):
         import torch
 
         views = self.scene.render_all_views()
-        ee_state = self.scene.get_ee_state()
+
+        if (hasattr(self.adapter, 'use_joint_state') and
+                self.adapter.use_joint_state and
+                hasattr(self.scene, 'get_joint_state')):
+            proprio = self.scene.get_joint_state()
+        else:
+            proprio = self.scene.get_ee_state()
+
         inp = VLAInput(
             images=[views["image"], views["image2"]],
             prompt=prompt,
-            proprio=ee_state,
+            proprio=proprio,
         )
 
         results = []

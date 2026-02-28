@@ -11,10 +11,15 @@ Architecture:
     [vision + language] -> cross-attention conditioning
     [state + noise] -> DiT (32 layers) -> denoised action chunk
 
-Action format: embodiment-specific (7D for LIBERO: EEF deltas + gripper)
+Action format: embodiment-specific, determined by EmbodimentTag.
 Output is multi-step action chunk (16 steps default).
 
 Requires CUDA — uses flash attention in the DiT and VLM backbone.
+
+Zero-shot probing approach: We use the base GR00T-N1.6-3B checkpoint
+(not finetuned on LIBERO) with ROBOCASA_PANDA_OMRON embodiment tag,
+which is the Panda variant present in the pretraining data. This gives
+us a true zero-shot reading on our standard Franka scene.
 """
 
 import os
@@ -38,8 +43,9 @@ class GR00TAdapter(VLAAdapter):
         - Embodiment-specific proprio/action MLPs
         - 3B parameters total
 
-    For LIBERO evaluation, uses the finetuned checkpoint with
-    EmbodimentTag for LIBERO's Franka setup.
+    We use the base checkpoint with ROBOCASA_PANDA_OMRON tag (Panda in
+    pretrain data) for zero-shot evaluation on our standard Franka scene.
+    No LIBERO-specific optimization — consistent with Avik's methodology.
 
     For variance measurement, we use different random seeds for the
     flow matching sampling process (similar to X-VLA and Cosmos Policy).
@@ -47,19 +53,24 @@ class GR00TAdapter(VLAAdapter):
 
     model_name = "groot"
 
-    # HuggingFace checkpoint — LIBERO finetuned
+    # Base checkpoint — zero-shot (no LIBERO finetuning)
     CHECKPOINT = "nvidia/GR00T-N1.6-3B"
-    # Fall back to LIBERO-spatial finetuned if available
-    CHECKPOINT_LIBERO = "nvidia/GR00T-N1.6-libero-spatial"
+
+    # GR00T uses joint-space proprio via embodiment-specific MLPs
+    use_joint_state = True
 
     def __init__(self) -> None:
         self.policy = None
         self.device = None
         self._embodiment_tag = None
+        self._modality_config = None
+        self._video_keys = None
+        self._state_keys = None
+        self._action_keys = None
 
     @property
     def action_dim(self) -> int:
-        return 7  # LIBERO: [dx, dy, dz, droll, dpitch, dyaw, gripper]
+        return 7  # Panda: 7-DoF arm actions
 
     @property
     def chunk_size(self) -> int:
@@ -89,6 +100,9 @@ class GR00TAdapter(VLAAdapter):
     def load_model(self, device: str = "cuda") -> None:
         """Load GR00T N1.6 policy.
 
+        Uses base checkpoint with ROBOCASA_PANDA_OMRON tag for zero-shot
+        probing. Falls back through candidate tags if one doesn't work.
+
         Args:
             device: Must be 'cuda' — GR00T requires flash attention.
         """
@@ -109,27 +123,50 @@ class GR00TAdapter(VLAAdapter):
             )
 
         print(f"Loading GR00T N1.6 on {self.device}...")
+        print(f"Checkpoint: {self.CHECKPOINT} (base, zero-shot)")
 
-        # Try LIBERO-specific checkpoint first, fall back to base
-        checkpoint = self.CHECKPOINT
-        try:
-            from huggingface_hub import model_info
-            model_info(self.CHECKPOINT_LIBERO)
-            checkpoint = self.CHECKPOINT_LIBERO
-            print(f"Using LIBERO-finetuned checkpoint: {checkpoint}")
-        except Exception:
-            print(f"Using base checkpoint: {checkpoint}")
+        # Try embodiment tags in preference order:
+        # 1. ROBOCASA_PANDA_OMRON — Panda in pretrain data (best for zero-shot)
+        # 2. LIBERO_PANDA — post-train registered (may work but not pretrained)
+        # 3. NEW_EMBODIMENT — generic fallback
+        tag_candidates = [
+            ("ROBOCASA_PANDA_OMRON", EmbodimentTag.ROBOCASA_PANDA_OMRON),
+            ("LIBERO_PANDA", EmbodimentTag.LIBERO_PANDA),
+            ("NEW_EMBODIMENT", EmbodimentTag.NEW_EMBODIMENT),
+        ]
 
-        # Determine LIBERO embodiment tag
-        # GR00T uses EmbodimentTag to configure proprio/action dims
-        self._embodiment_tag = EmbodimentTag.LIBERO
+        for tag_name, tag in tag_candidates:
+            try:
+                print(f"Trying embodiment tag: {tag_name}...")
+                self._embodiment_tag = tag
+                self.policy = Gr00tPolicy(
+                    model_path=self.CHECKPOINT,
+                    embodiment_tag=tag,
+                    device=str(self.device),
+                    strict=False,  # Relaxed validation for probing
+                )
+                print(f"SUCCESS: Loaded with {tag_name}")
+                break
+            except Exception as e:
+                print(f"  {tag_name} failed: {e}")
+                self.policy = None
+                continue
 
-        self.policy = Gr00tPolicy(
-            model_path=checkpoint,
-            embodiment_tag=self._embodiment_tag,
-            device=str(self.device),
-            strict=False,  # Relaxed validation for probing
-        )
+        if self.policy is None:
+            raise RuntimeError(
+                "Failed to load GR00T N1.6 with any embodiment tag. "
+                "Check that Isaac-GR00T is installed and checkpoint is downloaded."
+            )
+
+        # Query modality config to understand expected I/O
+        self._modality_config = self.policy.get_modality_config()
+        self._video_keys = self._modality_config["video"].modality_keys
+        self._state_keys = self._modality_config["state"].modality_keys
+        self._action_keys = self._modality_config["action"].modality_keys
+
+        print(f"Expected video keys: {self._video_keys}")
+        print(f"Expected state keys: {self._state_keys}")
+        print(f"Expected action keys: {self._action_keys}")
 
         n_params = sum(
             p.numel() for p in self.policy.model.parameters()
@@ -143,6 +180,10 @@ class GR00TAdapter(VLAAdapter):
             video: {camera_name: (B, T, H, W, 3) uint8}
             state: {state_name: (B, T, D) float32}
             language: {task: [[str]]}
+
+        Camera and state key names are determined by the embodiment tag's
+        modality config. We map our scene's outputs to whatever keys
+        the model expects.
         """
         # Primary image — add batch and temporal dims: (1, 1, H, W, 3)
         primary = inp.images[0]
@@ -150,20 +191,35 @@ class GR00TAdapter(VLAAdapter):
             primary = (primary * 255).astype(np.uint8)
         primary = primary[np.newaxis, np.newaxis, ...]  # (1, 1, H, W, 3)
 
-        video = {"agentview": primary}
-
-        # Add wrist camera if available
-        if len(inp.images) > 1:
-            wrist = inp.images[1]
-            if wrist.dtype != np.uint8:
-                wrist = (wrist * 255).astype(np.uint8)
-            wrist = wrist[np.newaxis, np.newaxis, ...]
-            video["robot0_eye_in_hand"] = wrist
+        # Map our cameras to expected video keys
+        video = {}
+        if self._video_keys:
+            # First video key gets primary camera
+            video[self._video_keys[0]] = primary
+            # Second video key gets wrist/secondary camera if available
+            if len(self._video_keys) > 1 and len(inp.images) > 1:
+                wrist = inp.images[1]
+                if wrist.dtype != np.uint8:
+                    wrist = (wrist * 255).astype(np.uint8)
+                wrist = wrist[np.newaxis, np.newaxis, ...]
+                video[self._video_keys[1]] = wrist
+        else:
+            # Fallback to standard names
+            video["agentview"] = primary
+            if len(inp.images) > 1:
+                wrist = inp.images[1]
+                if wrist.dtype != np.uint8:
+                    wrist = (wrist * 255).astype(np.uint8)
+                video["robot0_eye_in_hand"] = wrist[np.newaxis, np.newaxis, ...]
 
         # Proprio state — (1, 1, D) float32
-        state = {
-            "joint_position": inp.proprio.astype(np.float32)[np.newaxis, np.newaxis, ...]
-        }
+        proprio = inp.proprio.astype(np.float32)
+        state = {}
+        if self._state_keys:
+            # Use the first state key
+            state[self._state_keys[0]] = proprio[np.newaxis, np.newaxis, ...]
+        else:
+            state["joint_position"] = proprio[np.newaxis, np.newaxis, ...]
 
         # Language instruction
         language = {"task": [[inp.prompt]]}
@@ -185,15 +241,25 @@ class GR00TAdapter(VLAAdapter):
 
         action_dict, info = self.policy.get_action(obs)
 
-        # Extract actions — find the action key
+        # Extract actions — use known action keys or find first array
         actions = None
-        for key, val in action_dict.items():
-            if isinstance(val, np.ndarray):
-                actions = val
-                break
+        if self._action_keys:
+            for key in self._action_keys:
+                if key in action_dict and isinstance(action_dict[key], np.ndarray):
+                    actions = action_dict[key]
+                    break
 
         if actions is None:
-            raise RuntimeError(f"No action array in GR00T output: {action_dict.keys()}")
+            # Fallback: find first numpy array in output
+            for key, val in action_dict.items():
+                if isinstance(val, np.ndarray):
+                    actions = val
+                    break
+
+        if actions is None:
+            raise RuntimeError(
+                f"No action array in GR00T output: {action_dict.keys()}"
+            )
 
         # Shape: (B, T, D) -> (T, D)
         if actions.ndim == 3:
@@ -203,7 +269,12 @@ class GR00TAdapter(VLAAdapter):
 
         return VLAOutput(
             actions=actions,
-            raw_output={"seed": seed, "info": info},
+            raw_output={
+                "seed": seed,
+                "info": info,
+                "embodiment_tag": str(self._embodiment_tag),
+                "action_keys": self._action_keys,
+            },
         )
 
     def predict_action_multi_seed(
@@ -226,14 +297,15 @@ class GR00TAdapter(VLAAdapter):
             "WARNING: GR00T attention extraction not implemented. "
             "DiT cross-attention extraction requires custom hooks."
         )
-        dummy_size = 16
         return {
             "spatial_attention": np.zeros((256, 256)),
-            "raw_attention": np.zeros((dummy_size, dummy_size)),
-            "patch_attention": np.zeros((dummy_size, dummy_size)),
             "n_image_tokens": 0,
-            "patch_grid_size": dummy_size,
         }
 
     def reset(self) -> None:
-        """No internal state to reset."""
+        """Reset policy state between episodes."""
+        if self.policy is not None:
+            try:
+                self.policy.reset()
+            except Exception:
+                pass  # Policy may be stateless
