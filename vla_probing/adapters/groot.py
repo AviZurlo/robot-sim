@@ -113,7 +113,7 @@ class GR00TAdapter(VLAAdapter):
 
         self._ensure_groot_importable()
 
-        from gr00t.policy import Gr00tPolicy
+        from gr00t.policy.gr00t_policy import Gr00tPolicy
         from gr00t.data.embodiment_tags import EmbodimentTag
 
         self.device = _get_device(device)
@@ -140,7 +140,7 @@ class GR00TAdapter(VLAAdapter):
                 print(f"Trying embodiment tag: {tag_name}...")
                 self._embodiment_tag = tag
                 self.policy = Gr00tPolicy(
-                    model_path=self.CHECKPOINT,
+                    model_path=__import__("huggingface_hub").snapshot_download(self.CHECKPOINT, local_files_only=True),
                     embodiment_tag=tag,
                     device=str(self.device),
                     strict=False,  # Relaxed validation for probing
