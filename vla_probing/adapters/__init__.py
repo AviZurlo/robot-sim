@@ -1,6 +1,7 @@
 """VLA model adapters."""
 
 from vla_probing.adapters.openvla import OpenVLAAdapter
+from vla_probing.adapters.openvla_oft import OpenVLAOFTAdapter
 from vla_probing.adapters.pi0 import Pi0Adapter
 
 # CUDA-only models — conditional imports
@@ -14,4 +15,4 @@ try:
 except ImportError:
     GR00TAdapter = None
 
-__all__ = ["OpenVLAAdapter", "Pi0Adapter", "CosmosPolicyAdapter", "GR00TAdapter"]
+__all__ = ["OpenVLAAdapter", "OpenVLAOFTAdapter", "Pi0Adapter", "CosmosPolicyAdapter", "GR00TAdapter"]
