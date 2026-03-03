@@ -68,6 +68,15 @@ class VLAAdapter(ABC):
     def reset(self) -> None:
         """Reset any internal state (action queues, caches). Override if needed."""
 
+    def seed_for_inference(self, seed: int) -> None:
+        """Seed all randomness sources before inference for reproducible comparison.
+
+        Override in adapters that have additional internal RNG state (e.g. cosmos_policy).
+        """
+        import torch
+        torch.manual_seed(seed)
+
+
 
 def _get_device(preferred: str = "mps") -> torch.device:
     """Resolve device, falling back gracefully."""

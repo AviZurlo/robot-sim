@@ -243,3 +243,9 @@ class CosmosPolicyAdapter(VLAAdapter):
     def reset(self) -> None:
         """Reset seed for next prediction."""
         self._seed = (self._seed + 1) % 256
+
+    def seed_for_inference(self, seed: int) -> None:
+        """Also reset the cosmos diffusion seed so comparisons are fair."""
+        import torch
+        torch.manual_seed(seed)
+        self._seed = seed % 256

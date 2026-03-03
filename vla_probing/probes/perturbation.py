@@ -32,9 +32,6 @@ class PerturbationProbe(Probe):
     description = "Move blocks to test trajectory adaptation"
 
     def run(self, seed: int = 0, **kwargs: Any) -> ProbeResult:
-        import torch
-
-        torch.manual_seed(seed)
         prompt = "pick up the red block"
 
         # 1. Get baseline trajectory
@@ -44,7 +41,7 @@ class PerturbationProbe(Probe):
             raise RuntimeError("Red block not found in scene")
         positions = _perturbation_positions(default_pos)
 
-        baseline_actions, baseline_views = self._predict(prompt)
+        baseline_actions, baseline_views = self._predict(prompt, seed=seed)
         baseline_2d = np.atleast_2d(baseline_actions).reshape(
             -1, baseline_actions.shape[-1]
         )
@@ -56,10 +53,9 @@ class PerturbationProbe(Probe):
             if name == "default":
                 continue
 
-            torch.manual_seed(seed)
             self.scene.reset()
             self.scene.set_red_block_pos(pos)
-            actions, views = self._predict(prompt)
+            actions, views = self._predict(prompt, seed=seed)
             actions_2d = np.atleast_2d(actions).reshape(-1, actions.shape[-1])
             traj_xyz = actions_2d[:, :3]
 

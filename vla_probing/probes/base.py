@@ -39,8 +39,15 @@ class Probe(ABC):
         self,
         prompt: str,
         scene: Scene | None = None,
+        seed: int | None = None,
     ) -> tuple[np.ndarray, dict[str, np.ndarray]]:
         """Run VLA prediction on the current scene.
+
+        Args:
+            seed: If provided, calls adapter.seed_for_inference(seed) after reset()
+                  so that all randomness sources (torch RNG + adapter-internal seeds)
+                  are identical across multiple _predict() calls. Pass the same seed
+                  to baseline and variant predictions to isolate scene changes.
 
         Returns (actions, views) tuple.
         """
@@ -63,6 +70,8 @@ class Probe(ABC):
         )
 
         self.adapter.reset()
+        if seed is not None:
+            self.adapter.seed_for_inference(seed)
         output = self.adapter.predict_action(inp)
         return output.actions, views
 
