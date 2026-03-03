@@ -129,6 +129,40 @@ SCENE_DISPLAY = {
 # Known scene suffixes for parsing result filenames
 KNOWN_SCENES = {"franka", "widowx"}
 
+# Static fallback metadata for models whose JSON lacks a _meta block
+STATIC_MODEL_META = {
+    "xvla": {
+        "architecture": "InternVL2 + soft prompts + flow matching",
+        "params_m": 900,
+        "embodiment": "WidowX",
+    },
+    "pi0": {
+        "architecture": "PaliGemma VLM + flow matching DiT",
+        "params_m": 3000,
+        "embodiment": "LIBERO Franka / cross-embodiment",
+    },
+    "openvla": {
+        "architecture": "Llama-2 + DINOv2 + SigLIP → 256-bin tokens",
+        "params_m": 7000,
+        "embodiment": "WidowX / BridgeV2",
+    },
+    "openvla_oft": {
+        "architecture": "Llama-2 + DINOv2 + SigLIP + OFT head",
+        "params_m": 7000,
+        "embodiment": "Franka",
+    },
+    "cosmos_policy": {
+        "architecture": "Cosmos tokenizer + diffusion policy",
+        "params_m": 2000,
+        "embodiment": "Franka",
+    },
+    "groot": {
+        "architecture": "Eagle VLM + T5 + DiT flow matching",
+        "params_m": 3000,
+        "embodiment": "Franka (Panda)",
+    },
+}
+
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -171,9 +205,13 @@ def load_all_results() -> dict[str, dict]:
     return results
 
 
-def get_model_meta(data: dict) -> dict:
-    """Extract _meta block from model results."""
-    return data.get("_meta", {})
+def get_model_meta(data: dict, model_key: str = "") -> dict:
+    """Extract _meta block from model results, falling back to static metadata."""
+    meta = data.get("_meta", {})
+    if not meta and model_key:
+        _, base, _ = _parse_result_key("probe_results_" + model_key)
+        meta = dict(STATIC_MODEL_META.get(base, {}))
+    return meta
 
 
 def get_model_color(key: str) -> str:
@@ -207,7 +245,7 @@ else:
 
 page = st.sidebar.radio(
     "Navigate",
-    ["About", "Overview", "Per-Probe Details", "Metrics Explorer", "Attention Maps"],
+    ["About", "Overview", "Findings", "Per-Probe Details", "Metrics Explorer", "Attention Maps"],
 )
 
 st.sidebar.divider()
@@ -286,11 +324,14 @@ Each probe tests a specific hypothesis about what the model has learned:
 
 ### Models Under Comparison
 
-| Model | Params | Architecture | Action Space | Embodiment |
-|-------|--------|-------------|-------------|------------|
-| **X-VLA** | 0.9B | InternVL2 + soft prompts + flow matching | Continuous | WidowX |
-| **π0** | 3B | PaliGemma + flow matching | Continuous | LIBERO / cross-embodiment |
-| **OpenVLA** | 7B | Llama-2 + DINOv2 + SigLIP → text tokens | Discrete (text) | WidowX / BridgeV2 |
+| Model | Params | Architecture | Action Space | Embodiment | Status |
+|-------|--------|-------------|-------------|------------|--------|
+| **X-VLA** | 0.9B | InternVL2 + soft prompts + flow matching | Continuous | WidowX | ✅ Done |
+| **π0** | 3B | PaliGemma + flow matching | Continuous | Franka + WidowX | ✅ Done |
+| **OpenVLA** | 7B | Llama-2 + DINOv2 + SigLIP → 256-bin tokens | Discrete | WidowX / BridgeV2 | ✅ Done |
+| **OpenVLA-OFT** | 7B | Llama-2 + DINOv2 + SigLIP + OFT head | Continuous | Franka | ✅ Done |
+| **Cosmos Policy** | 2B | Cosmos tokenizer + diffusion | Continuous | Franka | ✅ Done |
+| **GR00T N1.6** | 3B | Eagle VLM + T5 + DiT flow matching | Continuous | Franka (Panda) | 🔄 Running |
 
 ### Key Research Questions
 
@@ -377,21 +418,22 @@ elif page == "Overview":
     st.subheader("Models")
     cols = st.columns(max(len(selected_models), 1))
     for i, model in enumerate(selected_models):
-        meta = get_model_meta(all_results[model])
+        meta = get_model_meta(all_results[model], model)
         with cols[i % len(cols)]:
             st.markdown(
                 f"**{get_model_display(model)}**"
             )
             if meta:
-                st.caption(
-                    f"Architecture: {meta.get('architecture', '—')}\n\n"
-                    f"Parameters: {meta.get('params_m', '?')}M\n\n"
-                    f"Embodiment: {meta.get('embodiment', '—')}\n\n"
-                    f"Device: {meta.get('device', '—')}\n\n"
-                    f"Runtime: {meta.get('total_elapsed_s', '?'):.0f}s"
-                    if isinstance(meta.get("total_elapsed_s"), (int, float))
-                    else f"Runtime: {meta.get('total_elapsed_s', '?')}"
-                )
+                lines = [
+                    f"Architecture: {meta.get('architecture', '—')}",
+                    f"Parameters: {meta.get('params_m', '?')}M",
+                    f"Embodiment: {meta.get('embodiment', '—')}",
+                ]
+                if meta.get("device"):
+                    lines.append(f"Device: {meta['device']}")
+                if isinstance(meta.get("total_elapsed_s"), (int, float)):
+                    lines.append(f"Runtime: {meta['total_elapsed_s']:.0f}s")
+                st.caption("\n\n".join(lines))
             else:
                 st.caption("No metadata available")
 
@@ -615,6 +657,300 @@ elif page == "Overview":
         )
         st.plotly_chart(fig, use_container_width=True)
 
+
+
+# ===================================================================
+# PAGE: Findings
+# ===================================================================
+elif page == "Findings":
+    import numpy as np
+
+    st.header("Findings")
+    st.markdown(
+        "Key discoveries from probing **5 VLA models** across **8 diagnostic tests**. "
+        "Each finding is grounded in specific probe metrics."
+    )
+
+    # ── Pre-compute metrics for callouts ──
+    def _get_metric(model_key, probe, metric, default=None):
+        d = all_results.get(model_key, {}).get(probe, {})
+        return d.get("metrics", {}).get(metric, default)
+
+    # ─────────────────────────────────────
+    # Section 1: Key Discoveries
+    # ─────────────────────────────────────
+    st.subheader("Key Discoveries")
+
+    with st.container(border=True):
+        st.markdown("#### 1. No model reliably obeys 'stop' instructions")
+        st.markdown(
+            "Every model moves significantly when instructed *'don't move'*, *'stay still'*, "
+            "or similar null-action prompts. The best result is X-VLA at 59% of normal movement. "
+            "Cosmos Policy actually moves **more** when told to stop."
+        )
+        ratio_data = {
+            m: _get_metric(m, "null_action", "null_vs_baseline_ratio")
+            for m in selected_models
+        }
+        ratio_data = {k: v for k, v in ratio_data.items() if v is not None}
+        if ratio_data:
+            import plotly.graph_objects as go
+            sorted_items = sorted(ratio_data.items(), key=lambda x: x[1])
+            bar_colors = [
+                "#2ecc71" if v < 0.8 else ("#f39c12" if v < 1.0 else "#e74c3c")
+                for v in [x[1] for x in sorted_items]
+            ]
+            fig = go.Figure()
+            fig.add_hline(y=1.0, line_dash="dash", line_color="gray",
+                          annotation_text="1.0 = ignores instruction", annotation_position="top right")
+            fig.add_bar(
+                x=[get_model_display(m) for m, _ in sorted_items],
+                y=[v for _, v in sorted_items],
+                marker_color=bar_colors,
+                text=[f"{v:.3f}" for _, v in sorted_items],
+                textposition="outside",
+            )
+            fig.update_layout(
+                height=300,
+                margin=dict(l=10, r=10, t=10, b=10),
+                yaxis_title="null movement ÷ baseline movement",
+                yaxis=dict(range=[0, max(v for _, v in sorted_items) * 1.2]),
+                showlegend=False,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        st.caption(
+            "Green < 0.8 (partial compliance) · Orange 0.8–1.0 (near-miss) · "
+            "Red > 1.0 (moves more when told to stop)"
+        )
+
+    with st.container(border=True):
+        st.markdown("#### 2. OpenVLA's quantization creates a complete semantic dead zone")
+        ovla = all_results.get("openvla_widowx", {})
+        if ovla:
+            null_disps = [
+                ovla.get("null_action", {}).get("metrics", {}).get(k)
+                for k in ["null_dont_move_displacement", "null_stay_still_displacement",
+                          "null_do_nothing_displacement", "baseline_pick_displacement"]
+                if ovla.get("null_action", {}).get("metrics", {}).get(k) is not None
+            ]
+            if null_disps and len(set(f"{v:.4f}" for v in null_disps)) == 1:
+                st.markdown(
+                    f"OpenVLA (WidowX) produces **identical displacement ({null_disps[0]:.4f})** for every "
+                    f"null-action variant — *'don't move'*, *'stay still'*, and the baseline pick all "
+                    f"produce exactly the same output. Counterfactual synonym sensitivity = **0.000** "
+                    f"(all synonyms map to the same 256-bin tokens). "
+                    f"This is the 256-bin discrete action tokenization creating a dead zone: small input "
+                    f"changes don't cross bin boundaries, producing identical outputs."
+                )
+            else:
+                st.markdown(
+                    "OpenVLA (WidowX) shows near-zero sensitivity to all language variations "
+                    "due to 256-bin discrete action tokenization."
+                )
+        else:
+            st.markdown(
+                "OpenVLA (WidowX) shows near-zero sensitivity to all language and spatial variations "
+                "due to 256-bin discrete action tokenization creating a dead zone."
+            )
+
+    with st.container(border=True):
+        st.markdown("#### 3. π0 fails completely on cross-embodiment, excels on native")
+        pi0_franka_da = _get_metric("pi0_franka", "baseline", "direction_alignment")
+        pi0_widowx_da = _get_metric("pi0_widowx", "baseline", "direction_alignment")
+        if pi0_franka_da is not None and pi0_widowx_da is not None:
+            st.markdown(
+                f"π0 on **Franka** (native embodiment): direction alignment = **{pi0_franka_da:.3f}** "
+                f"(arm moves toward target). "
+                f"π0 on **WidowX** (cross-embodiment): direction alignment = **{pi0_widowx_da:.3f}** "
+                f"(arm actively moves *away* from target). "
+                f"The model learned strong embodiment-specific spatial priors during training; "
+                f"when paired with an unfamiliar robot body, those priors invert."
+            )
+        else:
+            st.markdown(
+                "π0 direction alignment: +0.47 on native Franka, −0.01 on cross-embodiment WidowX. "
+                "The model's learned spatial priors invert when the embodiment changes."
+            )
+
+    with st.container(border=True):
+        st.markdown("#### 4. Cosmos Policy and OpenVLA-OFT run static trajectories")
+        cosmos_pert = _get_metric("cosmos_policy_franka", "perturbation", "mean_perturbation_sensitivity")
+        oft_pert = _get_metric("openvla_oft_franka", "perturbation", "mean_perturbation_sensitivity")
+        cosmos_sym = _get_metric("cosmos_policy_franka", "spatial_symmetry", "perturbation_sensitivity")
+        oft_sym = _get_metric("openvla_oft_franka", "spatial_symmetry", "perturbation_sensitivity")
+        st.markdown(
+            f"**Cosmos Policy** spatial symmetry sensitivity = **{cosmos_sym:.3f}**, "
+            f"perturbation sensitivity = **{cosmos_pert:.4f}**. "
+            f"**OpenVLA-OFT** spatial symmetry sensitivity = **{oft_sym:.3f}**, "
+            f"perturbation sensitivity = **{oft_pert:.4f}**. "
+            f"Both models produce the same trajectory regardless of where the target object is. "
+            f"Cosmos Policy also has zero sensitivity to mirroring the camera. "
+            f"These models appear to execute a memorized motion plan rather than reacting to the scene."
+        ) if None not in (cosmos_pert, oft_pert, cosmos_sym, oft_sym) else st.markdown(
+            "Cosmos Policy and OpenVLA-OFT both show near-zero sensitivity to object position changes "
+            "across both the spatial symmetry and perturbation probes."
+        )
+
+    with st.container(border=True):
+        st.markdown("#### 5. X-VLA shows appropriate distance-to-sensitivity scaling")
+        xvla_corr = _get_metric("xvla_widowx", "perturbation", "sensitivity_displacement_correlation")
+        xvla_dist = _get_metric("xvla_widowx", "baseline", "distance_to_target")
+        if xvla_corr is not None:
+            st.markdown(
+                f"X-VLA's perturbation sensitivity correlates with displacement from target "
+                f"(r = **{xvla_corr:.3f}**): it moves more when objects are further away. "
+                f"This is the *correct* behavior — the model is implicitly calibrating effort. "
+                f"X-VLA also reaches closest to the target (distance = **{xvla_dist:.3f}**) "
+                f"and is the only model with partial null-action compliance (ratio = 0.587)."
+            )
+
+    # ─────────────────────────────────────
+    # Section 2: Architecture Comparison
+    # ─────────────────────────────────────
+    st.subheader("Architecture Groupings")
+    st.markdown(
+        "Models grouped by action representation. The discrete-token bottleneck "
+        "(OpenVLA) and diffusion approaches (X-VLA, π0, Cosmos, GR00T) show "
+        "qualitatively different failure modes."
+    )
+
+    arch_groups = {
+        "Discrete tokens": ["openvla_widowx"],
+        "Discrete + OFT head": ["openvla_oft_franka"],
+        "Flow matching": ["xvla_widowx", "pi0_franka", "pi0_widowx", "cosmos_policy_franka"],
+        "Pending": ["groot_franka"],
+    }
+
+    key_probes = [
+        ("Baseline direction", "baseline", "direction_alignment"),
+        ("Null compliance", "null_action", "null_vs_baseline_ratio"),
+        ("Spatial sensitivity", "spatial_symmetry", "perturbation_sensitivity"),
+        ("Language sensitivity", "counterfactual", "mean_synonym_sensitivity"),
+        ("Vision dependence", "view_ablation", "full_vision_ablation_sensitivity"),
+    ]
+
+    group_rows = []
+    for group, models in arch_groups.items():
+        for m in models:
+            if m not in all_results:
+                continue
+            row = {"Group": group, "Model": get_model_display(m)}
+            for label, probe, metric in key_probes:
+                val = _get_metric(m, probe, metric)
+                row[label] = f"{val:.3f}" if val is not None else "—"
+            group_rows.append(row)
+
+    if group_rows:
+        import pandas as pd
+        group_df = pd.DataFrame(group_rows)
+        st.dataframe(group_df.set_index(["Group", "Model"]), use_container_width=True)
+
+    # ─────────────────────────────────────
+    # Section 3: Per-Model Analysis
+    # ─────────────────────────────────────
+    st.subheader("Per-Model Analysis")
+
+    model_findings = {
+        "xvla_widowx": {
+            "headline": "Conservative, compliant, spatially modest",
+            "text": (
+                "X-VLA is the only model that partially honors null-action instructions "
+                "(null_vs_baseline_ratio = 0.587, meaning 41% movement reduction). "
+                "It also reaches closest to the target (distance_to_target = 0.059) "
+                "and shows the best attention-IoU (0.173). "
+                "However, its direction alignment is low (0.142) and sensitivity to spatial changes "
+                "is near-zero — it finds the target but doesn't strongly track it. "
+                "The perturbation correlation (r = 0.847) suggests it scales effort with distance, "
+                "which is the right inductive bias."
+            ),
+        },
+        "pi0_franka": {
+            "headline": "High-motion, vision-reactive, embodiment-locked (Franka)",
+            "text": (
+                "On its native Franka embodiment, π0 achieves direction alignment = 0.471 "
+                "and spatial symmetry sensitivity = 1.658 — it strongly reacts when block positions "
+                "are swapped. Camera sensitivity is also very high (mirror = 1.658), suggesting "
+                "it's responding to pixel-level spatial features rather than 3D reasoning. "
+                "The trajectory jerk is by far the highest of all models (1.5), reflecting π0's "
+                "high-frequency, physically-rich action space."
+            ),
+        },
+        "pi0_widowx": {
+            "headline": "Cross-embodiment inversion — moves away from target",
+            "text": (
+                "On WidowX (cross-embodiment), π0's direction alignment collapses to −0.015: "
+                "the arm moves *away* from the target on average. The model learned spatial "
+                "priors specific to LIBERO's Franka setup; on WidowX's different kinematics "
+                "and workspace geometry, those priors invert. This is the most dramatic "
+                "embodiment sensitivity finding in the dataset."
+            ),
+        },
+        "openvla_widowx": {
+            "headline": "Quantization dead zone — language and spatial inputs ignored",
+            "text": (
+                "OpenVLA produces identical outputs for every null-action variant "
+                "(displacement = 0.2688 for all, including baseline). "
+                "Counterfactual synonym sensitivity = 0.0 exactly. "
+                "Perturbation sensitivity = 0.0. "
+                "This is the 256-bin discrete tokenization dead zone: most input variations "
+                "don't cross bin boundaries, so the output is unchanged. "
+                "The model does show some sensitivity to spatial symmetry (0.145) and camera "
+                "mirroring (0.145), where visual changes are large enough to shift token bins."
+            ),
+        },
+        "openvla_oft_franka": {
+            "headline": "Best directional accuracy, but still spatially blind",
+            "text": (
+                "OpenVLA-OFT achieves the highest direction alignment (0.526) of any tested model, "
+                "showing the OFT action head's benefit for continuous action quality. "
+                "However, spatial and perturbation sensitivity are essentially zero — "
+                "the model doesn't replan when objects move. "
+                "Vision ablation sensitivity is also low (0.118), suggesting the VLM backbone "
+                "isn't strongly using visual input for trajectory planning. "
+                "OFT fixes the action representation bottleneck but not the visual reasoning one."
+            ),
+        },
+        "cosmos_policy_franka": {
+            "headline": "Memorized trajectory — ignores both spatial and language inputs",
+            "text": (
+                "Cosmos Policy shows the most uniform failure mode: "
+                "zero sensitivity to spatial symmetry, zero sensitivity to object perturbations, "
+                "zero sensitivity to camera mirroring, and the worst null-action compliance "
+                "(ratio = 1.097 — it moves *more* when told to stop). "
+                "Its vision ablation shows it responds to secondary camera removal (0.460) "
+                "more than primary camera removal (0.071), which is unusual. "
+                "The model appears to execute a fixed trajectory with minimal scene conditioning — "
+                "likely a consequence of its proprioceptive pretraining distribution."
+            ),
+        },
+    }
+
+    present_models = [m for m in selected_models if m in model_findings]
+    if present_models:
+        tabs = st.tabs([get_model_display(m) for m in present_models])
+        for tab, m in zip(tabs, present_models):
+            with tab:
+                findings = model_findings[m]
+                st.markdown(f"**{findings['headline']}**")
+                st.markdown(findings["text"])
+
+                # Show a mini summary of key metrics
+                key_cols = st.columns(4)
+                metrics_to_show = [
+                    ("Direction align", "baseline", "direction_alignment"),
+                    ("Null compliance", "null_action", "null_vs_baseline_ratio"),
+                    ("Spatial sensitivity", "spatial_symmetry", "perturbation_sensitivity"),
+                    ("Language sensitivity", "counterfactual", "mean_synonym_sensitivity"),
+                ]
+                for i, (label, probe, metric) in enumerate(metrics_to_show):
+                    val = _get_metric(m, probe, metric)
+                    with key_cols[i]:
+                        if val is not None:
+                            st.metric(label, f"{val:.3f}")
+                        else:
+                            st.metric(label, "—")
+    else:
+        st.info("Select models in the sidebar to view per-model findings.")
 
 # ===================================================================
 # PAGE: Per-Probe Details
