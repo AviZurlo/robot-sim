@@ -526,7 +526,7 @@ elif page == "Overview":
         margin=dict(l=10, r=10, t=10, b=10),
         xaxis=dict(side="top"),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
 
     # Legend explaining each probe's key metric
     with st.expander("📖 How to read this chart"):
@@ -622,7 +622,7 @@ elif page == "Overview":
         height=500,
         margin=dict(l=60, r=60, t=40, b=40),
     )
-    st.plotly_chart(radar_fig, use_container_width=True)
+    st.plotly_chart(radar_fig, width='stretch')
 
     # ----- Execution time breakdown -----
     st.subheader("Probe Execution Time")
@@ -655,7 +655,7 @@ elif page == "Overview":
             height=350,
             margin=dict(l=10, r=10, t=10, b=10),
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
 
 
 
@@ -717,7 +717,7 @@ elif page == "Findings":
                 yaxis=dict(range=[0, max(v for _, v in sorted_items) * 1.2]),
                 showlegend=False,
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
         st.caption(
             "Green < 0.8 (partial compliance) · Orange 0.8–1.0 (near-miss) · "
             "Red > 1.0 (moves more when told to stop)"
@@ -778,18 +778,21 @@ elif page == "Findings":
         oft_pert = _get_metric("openvla_oft_franka", "perturbation", "mean_perturbation_sensitivity")
         cosmos_sym = _get_metric("cosmos_policy_franka", "spatial_symmetry", "perturbation_sensitivity")
         oft_sym = _get_metric("openvla_oft_franka", "spatial_symmetry", "perturbation_sensitivity")
-        st.markdown(
-            f"**Cosmos Policy** spatial symmetry sensitivity = **{cosmos_sym:.3f}**, "
-            f"perturbation sensitivity = **{cosmos_pert:.4f}**. "
-            f"**OpenVLA-OFT** spatial symmetry sensitivity = **{oft_sym:.3f}**, "
-            f"perturbation sensitivity = **{oft_pert:.4f}**. "
-            f"Both models produce the same trajectory regardless of where the target object is. "
-            f"Cosmos Policy also has zero sensitivity to mirroring the camera. "
-            f"These models appear to execute a memorized motion plan rather than reacting to the scene."
-        ) if None not in (cosmos_pert, oft_pert, cosmos_sym, oft_sym) else st.markdown(
-            "Cosmos Policy and OpenVLA-OFT both show near-zero sensitivity to object position changes "
-            "across both the spatial symmetry and perturbation probes."
-        )
+        if None not in (cosmos_pert, oft_pert, cosmos_sym, oft_sym):
+            st.markdown(
+                f"**Cosmos Policy** spatial symmetry sensitivity = **{cosmos_sym:.3f}**, "
+                f"perturbation sensitivity = **{cosmos_pert:.4f}**. "
+                f"**OpenVLA-OFT** spatial symmetry sensitivity = **{oft_sym:.3f}**, "
+                f"perturbation sensitivity = **{oft_pert:.4f}**. "
+                f"Both models produce the same trajectory regardless of where the target object is. "
+                f"Cosmos Policy also has zero sensitivity to mirroring the camera. "
+                f"These models appear to execute a memorized motion plan rather than reacting to the scene."
+            )
+        else:
+            st.markdown(
+                "Cosmos Policy and OpenVLA-OFT both show near-zero sensitivity to object position changes "
+                "across both the spatial symmetry and perturbation probes."
+            )
 
     with st.container(border=True):
         st.markdown("#### 5. X-VLA shows appropriate distance-to-sensitivity scaling")
@@ -843,7 +846,7 @@ elif page == "Findings":
     if group_rows:
         import pandas as pd
         group_df = pd.DataFrame(group_rows)
-        st.dataframe(group_df.set_index(["Group", "Model"]), use_container_width=True)
+        st.dataframe(group_df.set_index(["Group", "Model"]), width='stretch')
 
     # ─────────────────────────────────────
     # Section 3: Per-Model Analysis
@@ -1035,7 +1038,7 @@ elif page == "Per-Probe Details":
             margin=dict(l=10, r=10, t=10, b=10),
             xaxis_tickangle=-30,
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
 
     # Variant and timing info
     st.subheader("Run Details")
@@ -1047,7 +1050,7 @@ elif page == "Per-Probe Details":
             "Variant": probe_data.get("variant", "—"),
             "Time (s)": f"{probe_data.get('elapsed_s', 0):.1f}",
         })
-    st.dataframe(pd.DataFrame(detail_rows), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(detail_rows), width='stretch', hide_index=True)
 
 
 # ===================================================================
@@ -1126,7 +1129,7 @@ elif page == "Metrics Explorer":
             height=450,
             margin=dict(l=10, r=10, t=10, b=10),
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
     else:
         st.caption("No probes have both selected metrics.")
 
@@ -1160,7 +1163,7 @@ elif page == "Metrics Explorer":
             margin=dict(l=10, r=10, t=10, b=10),
             showlegend=False,
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
 
     st.divider()
 
@@ -1196,7 +1199,7 @@ elif page == "Metrics Explorer":
         )
         st.dataframe(
             pivot.style.format("{:.6f}", na_rep="—"),
-            use_container_width=True,
+            width='stretch',
         )
 
 
@@ -1257,7 +1260,7 @@ elif page == "Attention Maps":
                         margin=dict(l=10, r=10, t=10, b=10),
                         yaxis=dict(range=[0, 1]),
                     )
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width='stretch')
 
                 mean_iou = metrics.get("mean_attention_iou")
                 if mean_iou is not None:
@@ -1287,7 +1290,7 @@ elif page == "Attention Maps":
                         for img in images:
                             label = img.stem.split("_", 1)[-1].replace("_", " ")
                             st.caption(label)
-                            st.image(str(img), use_container_width=True)
+                            st.image(str(img), width='stretch')
             else:
                 # Single model
                 for model_key, images in model_images.items():
@@ -1297,7 +1300,7 @@ elif page == "Attention Maps":
                         with cols[j % 3]:
                             label = img.stem.split("_", 1)[-1].replace("_", " ")
                             st.caption(label)
-                            st.image(str(img), use_container_width=True)
+                            st.image(str(img), width='stretch')
 
         # Also show IoU metrics
         st.divider()
@@ -1334,4 +1337,4 @@ elif page == "Attention Maps":
                 margin=dict(l=10, r=10, t=10, b=10),
                 yaxis=dict(range=[0, 1]),
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
