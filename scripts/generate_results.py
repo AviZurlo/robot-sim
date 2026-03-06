@@ -261,72 +261,14 @@ def build_markdown_table(data: dict) -> str:
 
 def build_results_section(data: dict, figures_rel: str = "results/figures") -> str:
     table = build_markdown_table(data)
-    model_list = "\n".join(
-        f"| **{cfg['label']}** | {cfg['scene']} | {'✓' if cfg['valid'] else '† OOD'} |"
-        for cfg in MODELS.values()
+    return (
+        f"{table}
+
+"
+        "↑ higher is better · ↓ lower is better · "
+        "N/A = metric not available for this model/scene · "
+        "† Pi0 (WidowX) is out-of-distribution"
     )
-
-    return textwrap.dedent(f"""\
-    ## VLA Diagnostic Probing
-
-    Comparing 6 vision-language-action (VLA) models across 8 diagnostic probes in MuJoCo simulation.
-    Each probe tests a specific aspect of visual and language grounding — from basic reaching to null-action
-    compliance and attention localization.
-
-    ### Models
-
-    | Model | Scene | Valid |
-    | :--- | :---: | :---: |
-    {model_list}
-
-    † Pi0 on WidowX is out-of-distribution (Pi0 was trained on Franka). Results are not valid for comparison.
-
-    ### Radar Summary
-
-    ![Radar comparison]({figures_rel}/radar_comparison.png)
-
-    Each axis is normalized across all models (outward = better). See full metrics table below.
-
-    ### Full Results
-
-    {table}
-
-    ↑ higher is better · ↓ lower is better · N/A = metric not available for this model/scene
-
-    ### Probe Charts
-
-    | | |
-    |:---:|:---:|
-    | ![Baseline]({figures_rel}/probe_baseline.png) | ![Spatial Symmetry]({figures_rel}/probe_spatial_symmetry.png) |
-    | ![Camera Sensitivity]({figures_rel}/probe_camera_sensitivity.png) | ![View Ablation]({figures_rel}/probe_view_ablation.png) |
-    | ![Counterfactual]({figures_rel}/probe_counterfactual.png) | ![Null Action]({figures_rel}/probe_null_action.png) |
-    | ![Perturbation]({figures_rel}/probe_perturbation.png) | ![Attention]({figures_rel}/probe_attention.png) |
-
-    ### Key Findings
-
-    - **X-VLA** is the only model with genuine spatial grounding: it re-routes when blocks are swapped
-      (swap\\_sensitivity 1.50) and responds to block movement (perturbation sensitivity 0.98). However its
-      perturbation response is non-linear — it does not scale proportionally with displacement (correlation 0.24).
-    - **OpenVLA** runs a near-fixed motor program: zero perturbation sensitivity, identical outputs for all
-      synonym phrasings, and null/baseline ratio of exactly 1.0.
-    - **Pi0 (Franka)** is highly stochastic (trajectory spread 0.44), making it difficult to isolate genuine
-      scene conditioning from noise. Its perturbation correlation is strongly negative (-0.77), suggesting
-      out-of-distribution collapse for larger block displacements.
-    - **No model passes the null action test.** All models produce significant motion when instructed to
-      stay still, with null/baseline ratios ranging from 0.82 (X-VLA, best) to 1.06 (Cosmos Policy, worst).
-    - **Attention IoU is near zero for all models**, suggesting that spatial attention in these VLMs does
-      not localize to task-relevant objects in a pixel-precise way.
-
-    ### Reproducing Results
-
-    ```bash
-    # Run all probes for a model
-    python -m vla_probing.run_all --model xvla --scene widowx --device mps
-
-    # Regenerate this section and figures
-    python scripts/generate_results.py
-    ```
-    """)
 
 
 def main():
