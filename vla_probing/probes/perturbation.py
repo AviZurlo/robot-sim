@@ -98,6 +98,13 @@ class PerturbationProbe(Probe):
                     correlation
                 )
 
+        # Collect per-perturbation trajectory arrays for visualization
+        traj_artifacts = {
+            "baseline_xyz": baseline_xyz,
+        }
+        for name, res in perturbation_results.items():
+            traj_artifacts[f"traj_xyz_{name}"] = res["traj_xyz"]
+
         return self._make_result(
             variant="block_position_perturbations",
             actions=baseline_2d,
@@ -105,7 +112,7 @@ class PerturbationProbe(Probe):
             extra_metrics=extra_metrics,
             artifacts={
                 "baseline_view": baseline_views["image"],
-                "baseline_xyz": baseline_xyz,
+                **traj_artifacts,
             },
         )
 

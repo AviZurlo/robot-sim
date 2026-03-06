@@ -41,7 +41,7 @@ PROBE_INFO = {
     "spatial_symmetry": {
         "display": "Spatial Symmetry",
         "description": "Swap block positions to test spatial understanding",
-        "key_metric": "perturbation_sensitivity",
+        "key_metric": "swap_sensitivity",
         "metric_explanation": "How much does the trajectory change when block positions are swapped? Higher = more spatially aware.",
         "higher_is_better": True,
         "tests": "Whether the model adapts its trajectory when object positions are swapped.",
@@ -773,25 +773,23 @@ elif page == "Findings":
             )
 
     with st.container(border=True):
-        st.markdown("#### 4. Cosmos Policy and OpenVLA-OFT run static trajectories")
+        st.markdown("#### 4. OpenVLA-OFT runs static trajectories; Cosmos Policy shows weak spatial sensitivity")
         cosmos_pert = _get_metric("cosmos_policy_franka", "perturbation", "mean_perturbation_sensitivity")
         oft_pert = _get_metric("openvla_oft_franka", "perturbation", "mean_perturbation_sensitivity")
-        cosmos_sym = _get_metric("cosmos_policy_franka", "spatial_symmetry", "perturbation_sensitivity")
-        oft_sym = _get_metric("openvla_oft_franka", "spatial_symmetry", "perturbation_sensitivity")
+        cosmos_sym = _get_metric("cosmos_policy_franka", "spatial_symmetry", "swap_sensitivity")
+        oft_sym = _get_metric("openvla_oft_franka", "spatial_symmetry", "swap_sensitivity")
         if None not in (cosmos_pert, oft_pert, cosmos_sym, oft_sym):
             st.markdown(
-                f"**Cosmos Policy** spatial symmetry sensitivity = **{cosmos_sym:.3f}**, "
-                f"perturbation sensitivity = **{cosmos_pert:.4f}**. "
                 f"**OpenVLA-OFT** spatial symmetry sensitivity = **{oft_sym:.3f}**, "
-                f"perturbation sensitivity = **{oft_pert:.4f}**. "
-                f"Both models produce the same trajectory regardless of where the target object is. "
-                f"Cosmos Policy also has zero sensitivity to mirroring the camera. "
-                f"These models appear to execute a memorized motion plan rather than reacting to the scene."
+                f"perturbation sensitivity = **{oft_pert:.4f}** — identical trajectory regardless of object position. "
+                f"**Cosmos Policy** spatial symmetry sensitivity = **{cosmos_sym:.3f}**, "
+                f"perturbation sensitivity = **{cosmos_pert:.4f}** — low but non-zero, suggesting weak spatial grounding. "
+                f"Cosmos also has zero sensitivity to camera mirroring, consistent with the probe's known limitation for that metric."
             )
         else:
             st.markdown(
-                "Cosmos Policy and OpenVLA-OFT both show near-zero sensitivity to object position changes "
-                "across both the spatial symmetry and perturbation probes."
+                "OpenVLA-OFT shows near-zero sensitivity to object position changes. "
+                "Cosmos Policy shows low but non-zero spatial sensitivity after seed-control fix."
             )
 
     with st.container(border=True):
@@ -827,7 +825,7 @@ elif page == "Findings":
     key_probes = [
         ("Baseline direction", "baseline", "direction_alignment"),
         ("Null compliance", "null_action", "null_vs_baseline_ratio"),
-        ("Spatial sensitivity", "spatial_symmetry", "perturbation_sensitivity"),
+        ("Spatial sensitivity", "spatial_symmetry", "swap_sensitivity"),
         ("Language sensitivity", "counterfactual", "mean_synonym_sensitivity"),
         ("Vision dependence", "view_ablation", "full_vision_ablation_sensitivity"),
     ]
@@ -914,16 +912,16 @@ elif page == "Findings":
             ),
         },
         "cosmos_policy_franka": {
-            "headline": "Memorized trajectory — ignores both spatial and language inputs",
+            "headline": "Weak spatial grounding — low sensitivity to object position, ignores null commands",
             "text": (
-                "Cosmos Policy shows the most uniform failure mode: "
-                "zero sensitivity to spatial symmetry, zero sensitivity to object perturbations, "
-                "zero sensitivity to camera mirroring, and the worst null-action compliance "
-                "(ratio = 1.097 — it moves *more* when told to stop). "
-                "Its vision ablation shows it responds to secondary camera removal (0.460) "
-                "more than primary camera removal (0.071), which is unusual. "
-                "The model appears to execute a fixed trajectory with minimal scene conditioning — "
-                "likely a consequence of its proprioceptive pretraining distribution."
+                "Cosmos Policy shows low but non-zero spatial sensitivity: "
+                "spatial symmetry sensitivity = 0.009, perturbation sensitivity = 0.013. "
+                "Earlier runs showed all zeros — confirmed as a seed-control bug, not a real finding. "
+                "Camera mirroring sensitivity remains zero (likely a probe limitation). "
+                "Null-action compliance is poor (ratio = 1.057 — it moves more when told to stop). "
+                "Vision ablation shows secondary camera matters more than primary (0.268 vs 0.077), "
+                "which is an unusual asymmetry worth investigating. "
+                "Overall: the model has some scene conditioning but weak positional grounding."
             ),
         },
     }
@@ -942,7 +940,7 @@ elif page == "Findings":
                 metrics_to_show = [
                     ("Direction align", "baseline", "direction_alignment"),
                     ("Null compliance", "null_action", "null_vs_baseline_ratio"),
-                    ("Spatial sensitivity", "spatial_symmetry", "perturbation_sensitivity"),
+                    ("Spatial sensitivity", "spatial_symmetry", "swap_sensitivity"),
                     ("Language sensitivity", "counterfactual", "mean_synonym_sensitivity"),
                 ]
                 for i, (label, probe, metric) in enumerate(metrics_to_show):

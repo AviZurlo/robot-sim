@@ -5,6 +5,7 @@ scene, renders camera views, and exposes the same interface for
 block manipulation, camera mirroring, and end-effector state readout.
 """
 
+import threading
 from pathlib import Path
 
 import mujoco
@@ -20,6 +21,7 @@ WIDOWX_SCENE_XML = WIDOWX_ASSETS_DIR / "widowx_vision_scene.xml"
 WIDOWX_CAMERA_PRIMARY = "up"
 WIDOWX_CAMERA_SECONDARY = "side"
 WIDOWX_HOME_QPOS = np.array([0.0, -0.56, 0.76, 0.0, 1.27, 0.0, 0.015, -0.015])
+WIDOWX_HOME_CTRL = np.array([0.0, -0.56, 0.76, 0.0, 1.27, 0.0, 0.015])
 
 # ─── Franka constants ───────────────────────────────────────────────
 FRANKA_ASSETS_DIR = Path(__file__).parent / "assets" / "franka"
@@ -30,6 +32,7 @@ FRANKA_CAMERA_SECONDARY = "robot0_eye_in_hand"
 FRANKA_HOME_QPOS = np.array(
     [0.0, 0.0, 0.0, -1.57079, 0.0, 1.57079, -0.7853, 0.04, 0.04]
 )
+FRANKA_HOME_CTRL = np.array([0.0, 0.0, 0.0, -1.57079, 0.0, 1.57079, -0.7853, 255.0])
 
 # ─── Backward-compat aliases used by existing imports ────────────────
 ASSETS_DIR = WIDOWX_ASSETS_DIR
@@ -62,9 +65,15 @@ class WidowXScene:
         self._scene_xml = xml_path
         self.model = mujoco.MjModel.from_xml_path(str(xml_path))
         self.data = mujoco.MjData(self.model)
-        self.renderer = mujoco.Renderer(self.model, height=height, width=width)
         self.width = width
         self.height = height
+        # Thread-local renderer storage: each thread gets its own mujoco.Renderer
+        # so that each has its own CGL context (the CGL lock is per-context and
+        # is never released between render() calls, so sharing across threads
+        # causes permanent deadlock).
+        self._local = threading.local()
+        self.renderer = mujoco.Renderer(self.model, height=height, width=width)
+        self._local.renderer = self.renderer  # main-thread renderer
 
         # Body/joint IDs for manipulation
         self._red_block_body = mujoco.mj_name2id(
@@ -83,12 +92,22 @@ class WidowXScene:
             self.data.qpos[: len(qpos)] = qpos
         else:
             self.data.qpos[:8] = WIDOWX_HOME_QPOS
+            self.data.ctrl[:] = WIDOWX_HOME_CTRL
         mujoco.mj_forward(self.model, self.data)
+
+    def _get_renderer(self) -> mujoco.Renderer:
+        """Return the calling thread's renderer, creating one if needed."""
+        if not hasattr(self._local, "renderer"):
+            self._local.renderer = mujoco.Renderer(
+                self.model, height=self.height, width=self.width
+            )
+        return self._local.renderer
 
     def render(self, camera: str = WIDOWX_CAMERA_PRIMARY) -> np.ndarray:
         """Render the scene from the specified camera."""
-        self.renderer.update_scene(self.data, camera=camera)
-        return self.renderer.render()
+        r = self._get_renderer()
+        r.update_scene(self.data, camera=camera)
+        return r.render()
 
     def render_all_views(self) -> dict[str, np.ndarray]:
         """Render from both primary and secondary cameras."""
@@ -102,19 +121,37 @@ class WidowXScene:
 
         Returns 8D vector: [x, y, z, roll, pitch, yaw, 0, gripper_pos]
         """
+        ee_pos = None
+        ee_mat = None
+
+        # Try site first
         ee_site_id = mujoco.mj_name2id(
             self.model, mujoco.mjtObj.mjOBJ_SITE, "gripper"
         )
-
         if ee_site_id >= 0:
             ee_pos = self.data.site_xpos[ee_site_id].copy()
             ee_mat = self.data.site_xmat[ee_site_id].reshape(3, 3)
-        else:
-            ee_body = mujoco.mj_name2id(
-                self.model, mujoco.mjtObj.mjOBJ_BODY, "gripper_bar_link"
+
+        # Fall back to known WidowX body names
+        if ee_pos is None:
+            for body_name in [
+                "wx250s/gripper_link",
+                "gripper_bar_link",
+                "gripper_link",
+            ]:
+                ee_body = mujoco.mj_name2id(
+                    self.model, mujoco.mjtObj.mjOBJ_BODY, body_name
+                )
+                if ee_body >= 0:
+                    ee_pos = self.data.xpos[ee_body].copy()
+                    ee_mat = self.data.xmat[ee_body].reshape(3, 3)
+                    break
+
+        if ee_pos is None:
+            raise RuntimeError(
+                "Could not find EE site or body in WidowX scene. "
+                "Check scene XML for gripper body names."
             )
-            ee_pos = self.data.xpos[ee_body].copy()
-            ee_mat = self.data.xmat[ee_body].reshape(3, 3)
 
         ee_euler = _rotmat_to_euler(ee_mat)
         gripper_pos = self.data.qpos[6]
@@ -164,13 +201,19 @@ class WidowXScene:
         return self.data.xpos[body_id].copy()
 
     def mirror_camera(self, camera_name: str | None = None) -> None:
-        """Mirror the camera view horizontally (negate Y position)."""
+        """Mirror the camera view by shifting it 0.3m laterally (Y axis).
+
+        For cameras already at Y=0, negating Y is a no-op so we add a fixed
+        offset instead. For off-center cameras we negate as before.
+        """
         camera_name = camera_name or self.primary_camera
         cam_id = mujoco.mj_name2id(
             self.model, mujoco.mjtObj.mjOBJ_CAMERA, camera_name
         )
         if cam_id >= 0:
-            self.model.cam_pos[cam_id, 1] *= -1
+            y = self.model.cam_pos[cam_id, 1]
+            self.model.cam_pos[cam_id, 1] = -y if abs(y) > 1e-6 else 0.3
+            mujoco.mj_forward(self.model, self.data)  # propagate to data.cam_xpos
 
     def reset_camera(self, camera_name: str | None = None) -> None:
         """Reset camera to original position (reload model params)."""
@@ -182,6 +225,7 @@ class WidowXScene:
         if cam_id >= 0:
             self.model.cam_pos[cam_id] = original.cam_pos[cam_id]
             self.model.cam_quat[cam_id] = original.cam_quat[cam_id]
+            mujoco.mj_forward(self.model, self.data)  # propagate to data.cam_xpos
 
     def render_with_trajectory(
         self,
@@ -256,9 +300,11 @@ class FrankaScene:
         self._scene_xml = xml_path
         self.model = mujoco.MjModel.from_xml_path(str(xml_path))
         self.data = mujoco.MjData(self.model)
-        self.renderer = mujoco.Renderer(self.model, height=height, width=width)
         self.width = width
         self.height = height
+        self._local = threading.local()
+        self.renderer = mujoco.Renderer(self.model, height=height, width=width)
+        self._local.renderer = self.renderer  # main-thread renderer
 
         # Body IDs
         self._hand_body = mujoco.mj_name2id(
@@ -285,6 +331,7 @@ class FrankaScene:
             self.data.qpos[: len(qpos)] = qpos
         else:
             self.data.qpos[:9] = FRANKA_HOME_QPOS
+            self.data.ctrl[:] = FRANKA_HOME_CTRL
         mujoco.mj_forward(self.model, self.data)
         self._sync_wrist_camera()
 
@@ -297,10 +344,19 @@ class FrankaScene:
         # Offset camera slightly below the hand (looking down at table)
         self.model.cam_pos[self._wrist_cam_id] = hand_pos + np.array([0.0, 0.0, -0.05])
 
+    def _get_renderer(self) -> mujoco.Renderer:
+        """Return the calling thread's renderer, creating one if needed."""
+        if not hasattr(self._local, "renderer"):
+            self._local.renderer = mujoco.Renderer(
+                self.model, height=self.height, width=self.width
+            )
+        return self._local.renderer
+
     def render(self, camera: str = FRANKA_CAMERA_PRIMARY) -> np.ndarray:
         """Render the scene from the specified camera."""
-        self.renderer.update_scene(self.data, camera=camera)
-        return self.renderer.render()
+        r = self._get_renderer()
+        r.update_scene(self.data, camera=camera)
+        return r.render()
 
     def render_all_views(self) -> dict[str, np.ndarray]:
         """Render from both primary and secondary cameras."""
@@ -375,13 +431,19 @@ class FrankaScene:
         return self.data.xpos[body_id].copy()
 
     def mirror_camera(self, camera_name: str | None = None) -> None:
-        """Mirror the camera view horizontally (negate Y position)."""
+        """Mirror the camera view by shifting it 0.3m laterally (Y axis).
+
+        For cameras already at Y=0, negating Y is a no-op so we add a fixed
+        offset instead. For off-center cameras we negate as before.
+        """
         camera_name = camera_name or self.primary_camera
         cam_id = mujoco.mj_name2id(
             self.model, mujoco.mjtObj.mjOBJ_CAMERA, camera_name
         )
         if cam_id >= 0:
-            self.model.cam_pos[cam_id, 1] *= -1
+            y = self.model.cam_pos[cam_id, 1]
+            self.model.cam_pos[cam_id, 1] = -y if abs(y) > 1e-6 else 0.3
+            mujoco.mj_forward(self.model, self.data)  # propagate to data.cam_xpos
 
     def reset_camera(self, camera_name: str | None = None) -> None:
         """Reset camera to original position (reload model params)."""
@@ -393,6 +455,7 @@ class FrankaScene:
         if cam_id >= 0:
             self.model.cam_pos[cam_id] = original.cam_pos[cam_id]
             self.model.cam_quat[cam_id] = original.cam_quat[cam_id]
+            mujoco.mj_forward(self.model, self.data)  # propagate to data.cam_xpos
 
     def render_with_trajectory(
         self,

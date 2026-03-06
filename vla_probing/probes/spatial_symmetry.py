@@ -44,7 +44,7 @@ class SpatialSymmetryProbe(Probe):
 
         # Metrics
         extra_metrics = {
-            "perturbation_sensitivity": perturbation_sensitivity(
+            "swap_sensitivity": perturbation_sensitivity(
                 baseline_2d, swapped_2d
             ),
         }
