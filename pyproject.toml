@@ -1,40 +1,27 @@
 [project]
 name = "robot-sim"
-version = "0.1.0"
-description = "Run robot foundation models in MuJoCo simulation"
+version = "0.2.0"
+description = "Diagnostic probing of vision-language-action (VLA) models in MuJoCo simulation"
 requires-python = ">=3.10"
 dependencies = [
-    "lerobot[aloha,pusht]",
-    "matplotlib>=3.10.8",
-    "pillow>=12.1.1",
-    "plotly>=6.5.2",
+    "mujoco>=3.0",
+    "matplotlib>=3.7",
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "dtw-python",
     "streamlit",
+    "wandb",
 ]
 
 [project.optional-dependencies]
-dev = [
-    "ruff",
-    "pytest",
-]
-vla-probing = [
-    "lerobot[xvla,smolvla]",
-    "captum",
-    "plotly",
-    "wandb",
-    "dtw-python",
-    "scipy",
-    "kaleido",
-]
-pi0 = [
-    "scipy>=1.10.1,<1.15",
-]
-openvla = [
-    "transformers>=4.40.0",
-    "timm",
-    "tokenizers",
-    "Pillow",
-    "scipy",
-]
+dev = ["ruff", "pytest"]
 
-[project.scripts]
-lerobot-cache = "lerobot_cache.cli:main"
+# Model-specific extras (install what you need)
+xvla = ["lerobot[xvla]"]
+openvla = ["transformers>=4.40.0", "timm", "tokenizers", "Pillow"]
+pi0 = ["lerobot[pi0]", "scipy>=1.10,<1.15"]
+openvla-oft = ["transformers>=4.40.0", "timm"]
+cosmos = []   # install cosmos-policy separately; see scripts/setup_runpod.sh
+
+[tool.setuptools.packages.find]
+include = ["vla_probing*", "vendor*"]

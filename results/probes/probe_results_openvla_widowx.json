@@ -1,0 +1,114 @@
+{
+  "baseline": {
+    "metrics": {
+      "trajectory_jerk": 0.0,
+      "distance_to_target": 0.2691443335899296,
+      "trajectory_spread": 0.0018189143164238572
+    },
+    "elapsed_s": 24.38944387435913,
+    "variant": "pick_up_red_block"
+  },
+  "spatial_symmetry": {
+    "metrics": {
+      "trajectory_jerk": 0.0,
+      "perturbation_sensitivity": 0.145251900447717,
+      "swapped_distance_to_original_blue_pos": 0.26671388173235033
+    },
+    "elapsed_s": 1.9363932609558105,
+    "variant": "swap_red_blue"
+  },
+  "camera_sensitivity": {
+    "metrics": {
+      "trajectory_jerk": 0.0,
+      "mirror_camera_sensitivity": 0.145251900447717,
+      "flip_image_sensitivity": 0.04234410869232285
+    },
+    "elapsed_s": 2.9552440643310547,
+    "variant": "mirror_primary_camera"
+  },
+  "view_ablation": {
+    "metrics": {
+      "trajectory_jerk": 0.0,
+      "primary_ablation_sensitivity": 0.145251900447717,
+      "secondary_ablation_sensitivity": 0.04234410869232285,
+      "full_vision_ablation_sensitivity": 0.07360833828963502
+    },
+    "elapsed_s": 3.8591489791870117,
+    "variant": "zero_out_views"
+  },
+  "counterfactual": {
+    "metrics": {
+      "trajectory_jerk": 0.0,
+      "mean_synonym_sensitivity": 0.0,
+      "max_synonym_sensitivity": 0.0,
+      "vs_pick_up_the_red_cube": 0.0,
+      "vs_grab_the_red_block": 0.0,
+      "vs_grasp_the_crimson_block": 0.0,
+      "vs_pick_up_the_red_object": 0.0
+    },
+    "elapsed_s": 4.874665260314941,
+    "variant": "group_red_block_synonyms"
+  },
+  "null_action": {
+    "metrics": {
+      "trajectory_jerk": 0.0,
+      "mean_null_displacement": 0.2688289852278416,
+      "max_null_displacement": 0.2688289852278416,
+      "baseline_pick_displacement": 0.2688289852278416,
+      "null_vs_baseline_ratio": 1.0,
+      "null_dont_move_displacement": 0.2688289852278416,
+      "null_stay_still_displacement": 0.2688289852278416,
+      "null_do_nothing_displacement": 0.2688289852278416,
+      "null_remain_in_place_displacement": 0.2688289852278416,
+      "null_hold_position_displacement": 0.2688289852278416,
+      "spatial_move_up_displacement": 0.2688289852278416,
+      "spatial_move_down_displacement": 0.2688289852278416,
+      "spatial_move_forward_displacement": 0.2688289852278416,
+      "spatial_move_backward_displacement": 0.2688289852278416
+    },
+    "elapsed_s": 9.754893064498901,
+    "variant": "null_prompts"
+  },
+  "attention": {
+    "metrics": {
+      "trajectory_jerk": 0.0,
+      "iou_pick_up_the_red_block": 0.2190034762456547,
+      "iou_pick_up_the_blue_block": 0.0,
+      "mean_attention_iou": 0.10950173812282735
+    },
+    "elapsed_s": 6.180058717727661,
+    "variant": "multi_prompt_attention"
+  },
+  "perturbation": {
+    "metrics": {
+      "trajectory_jerk": 0.0,
+      "mean_perturbation_sensitivity": 0.0,
+      "max_perturbation_sensitivity": 0.0,
+      "shifted_left_sensitivity": 0.0,
+      "shifted_left_endpoint_dist": 0.30806903756389054,
+      "shifted_right_sensitivity": 0.0,
+      "shifted_right_endpoint_dist": 0.25054103995472043,
+      "shifted_forward_sensitivity": 0.0,
+      "shifted_forward_endpoint_dist": 0.316022279814696,
+      "shifted_back_sensitivity": 0.0,
+      "shifted_back_endpoint_dist": 0.2236230383208684,
+      "raised_sensitivity": 0.0,
+      "raised_endpoint_dist": 0.276295522985016
+    },
+    "elapsed_s": 5.884442329406738,
+    "variant": "block_position_perturbations"
+  },
+  "vlm_query": {
+    "metrics": {
+      "trajectory_jerk": 0.0,
+      "vlm_supported": 1.0,
+      "non_empty_response_rate": 1.0,
+      "mean_response_length": 128.0,
+      "total_queries": 8.0,
+      "non_empty_responses": 8.0,
+      "action_token_contamination_rate": 0.0
+    },
+    "elapsed_s": 150.35671615600586,
+    "variant": "vlm_scene_queries"
+  }
+}

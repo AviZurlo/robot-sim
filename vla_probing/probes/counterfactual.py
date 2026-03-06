@@ -43,19 +43,15 @@ class CounterfactualProbe(Probe):
     description = "Test language understanding with synonym variations"
 
     def run(self, seed: int = 0, **kwargs: Any) -> ProbeResult:
-        import torch
-
-        torch.manual_seed(seed)
         group = kwargs.get("group", "red_block_synonyms")
         prompts = SYNONYM_GROUPS.get(group, SYNONYM_GROUPS["red_block_synonyms"])
 
         self.scene.reset()
 
-        # Run inference for each prompt variant
+        # Run inference for each prompt variant with same seed for fair comparison
         all_actions = {}
         for prompt in prompts:
-            torch.manual_seed(seed)  # same seed for fair comparison
-            actions, _ = self._predict(prompt)
+            actions, _ = self._predict(prompt, seed=seed)
             actions_2d = np.atleast_2d(actions).reshape(-1, actions.shape[-1])
             all_actions[prompt] = actions_2d
 

@@ -20,23 +20,20 @@ class CameraSensitivityProbe(Probe):
     description = "Mirror/rotate camera to test spatial understanding"
 
     def run(self, seed: int = 0, **kwargs: Any) -> ProbeResult:
-        import torch
-
-        torch.manual_seed(seed)
         prompt = "pick up the red block"
 
         # 1. Baseline prediction
         self.scene.reset()
-        baseline_actions, baseline_views = self._predict(prompt)
+        baseline_actions, baseline_views = self._predict(prompt, seed=seed)
         baseline_2d = np.atleast_2d(baseline_actions).reshape(
             -1, baseline_actions.shape[-1]
         )
         baseline_xyz = baseline_2d[:, :3]
 
-        # 2. Mirrored camera prediction
+        # 2. Mirrored camera prediction — same seed so randomness doesn't inflate sensitivity
         self.scene.reset()
         self.scene.mirror_camera()
-        mirrored_actions, mirrored_views = self._predict(prompt)
+        mirrored_actions, mirrored_views = self._predict(prompt, seed=seed)
         mirrored_2d = np.atleast_2d(mirrored_actions).reshape(
             -1, mirrored_actions.shape[-1]
         )
@@ -57,6 +54,7 @@ class CameraSensitivityProbe(Probe):
             proprio=self.scene.get_ee_state(),
         )
         self.adapter.reset()
+        self.adapter.seed_for_inference(seed)
         flip_output = self.adapter.predict_action(inp)
         flip_2d = np.atleast_2d(flip_output.actions).reshape(
             -1, flip_output.actions.shape[-1]

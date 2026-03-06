@@ -21,14 +21,11 @@ class ViewAblationProbe(Probe):
     description = "Remove primary/secondary camera views"
 
     def run(self, seed: int = 0, **kwargs: Any) -> ProbeResult:
-        import torch
-
-        torch.manual_seed(seed)
         prompt = "pick up the red block"
 
         # 1. Baseline (both views)
         self.scene.reset()
-        baseline_actions, views = self._predict(prompt)
+        baseline_actions, views = self._predict(prompt, seed=seed)
         baseline_2d = np.atleast_2d(baseline_actions).reshape(
             -1, baseline_actions.shape[-1]
         )
@@ -43,6 +40,7 @@ class ViewAblationProbe(Probe):
             proprio=ee_state,
         )
         self.adapter.reset()
+        self.adapter.seed_for_inference(seed)
         no_primary_output = self.adapter.predict_action(inp_no_primary)
         no_primary_2d = np.atleast_2d(no_primary_output.actions).reshape(
             -1, no_primary_output.actions.shape[-1]
@@ -55,6 +53,7 @@ class ViewAblationProbe(Probe):
             proprio=ee_state,
         )
         self.adapter.reset()
+        self.adapter.seed_for_inference(seed)
         no_secondary_output = self.adapter.predict_action(inp_no_secondary)
         no_secondary_2d = np.atleast_2d(no_secondary_output.actions).reshape(
             -1, no_secondary_output.actions.shape[-1]
@@ -67,6 +66,7 @@ class ViewAblationProbe(Probe):
             proprio=ee_state,
         )
         self.adapter.reset()
+        self.adapter.seed_for_inference(seed)
         no_vision_output = self.adapter.predict_action(inp_no_vision)
         no_vision_2d = np.atleast_2d(no_vision_output.actions).reshape(
             -1, no_vision_output.actions.shape[-1]

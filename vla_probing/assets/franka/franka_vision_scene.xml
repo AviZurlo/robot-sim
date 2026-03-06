@@ -43,15 +43,19 @@
 
     <!-- Blue block on table surface -->
     <body name="blue_block" pos="0.5 -0.1 0.02">
-      <geom name="blue_block_geom" type="box" size="0.02 0.02 0.02" rgba="0.1 0.1 0.8 1"/>
+      <geom name="blue_block_geom" type="box" size="0.02 0.02 0.02" rgba="0.1 0.1 0.8 1" mass="0.05"/>
+      <freejoint/>
     </body>
 
     <!-- ==================== CAMERAS ==================== -->
 
-    <!-- "agentview" — LIBERO primary: front-facing, ~45° elevation, views workspace -->
+    <!-- "agentview" — LIBERO primary: front-facing, ~45° elevation, views workspace
+         Camera at [1.0, 0, 0.6] looking toward block center [0.5, 0, 0.02].
+         x_cam=[0,1,0] (right), y_cam=[-0.757,0,0.653] (up), z_cam=[0.653,0,0.757] (back).
+         Camera looks in -z_cam = [-0.653, 0, -0.757] toward workspace. -->
     <camera name="agentview"
             pos="1.0 0.0 0.6"
-            xyaxes="0 -1 0 0.45 0 0.9"
+            xyaxes="0 1 0 -0.757 0 0.653"
             mode="fixed"/>
 
     <!-- "robot0_eye_in_hand" — LIBERO wrist camera: positioned near default EE location.

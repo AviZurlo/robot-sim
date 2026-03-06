@@ -101,6 +101,18 @@ def main() -> None:
                 "variant": result.probe_variant,
             }
 
+            # Save trajectory artifacts to NPZ alongside JSON
+            import numpy as _np
+            _artifacts = {
+                k: v for k, v in result.artifacts.items()
+                if isinstance(v, _np.ndarray) and v.ndim >= 1
+            }
+            if _artifacts:
+                _traj_filename = f"probe_trajectories_{args.model}_{scene_name}_{probe.name}.npz"
+                _traj_path = output_dir / _traj_filename
+                _np.savez(_traj_path, **_artifacts)
+                print(f"  Trajectories saved: {_traj_filename} ({list(_artifacts.keys())})")
+
             print(f"\nResults ({elapsed:.1f}s):")
             for k, v in result.metrics.items():
                 print(f"  {k}: {v:.6f}")
@@ -115,6 +127,12 @@ def main() -> None:
     # Save results with model_scene naming
     result_filename = f"probe_results_{args.model}_{scene_name}.json"
     summary_path = output_dir / result_filename
+    # Merge with existing results so partial re-runs don't lose prior probes
+    if summary_path.exists():
+        with open(summary_path) as f:
+            existing = json.load(f)
+        existing.update(all_results)
+        all_results = existing
     with open(summary_path, "w") as f:
         json.dump(all_results, f, indent=2, default=str)
     print(f"\n\nResults saved to {summary_path}")

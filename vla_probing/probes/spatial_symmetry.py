@@ -20,23 +20,20 @@ class SpatialSymmetryProbe(Probe):
     description = "Swap block positions to test spatial understanding"
 
     def run(self, seed: int = 0, **kwargs: Any) -> ProbeResult:
-        import torch
-
-        torch.manual_seed(seed)
         prompt = "pick up the red block"
 
         # 1. Baseline prediction (default positions)
         self.scene.reset()
-        baseline_actions, baseline_views = self._predict(prompt)
+        baseline_actions, baseline_views = self._predict(prompt, seed=seed)
         baseline_2d = np.atleast_2d(baseline_actions).reshape(
             -1, baseline_actions.shape[-1]
         )
         baseline_xyz = baseline_2d[:, :3]
 
-        # 2. Swapped prediction
+        # 2. Swapped prediction — same seed so randomness doesn't inflate sensitivity
         self.scene.reset()
         self.scene.swap_block_positions()
-        swapped_actions, swapped_views = self._predict(prompt)
+        swapped_actions, swapped_views = self._predict(prompt, seed=seed)
         swapped_2d = np.atleast_2d(swapped_actions).reshape(
             -1, swapped_actions.shape[-1]
         )
@@ -47,7 +44,7 @@ class SpatialSymmetryProbe(Probe):
 
         # Metrics
         extra_metrics = {
-            "perturbation_sensitivity": perturbation_sensitivity(
+            "swap_sensitivity": perturbation_sensitivity(
                 baseline_2d, swapped_2d
             ),
         }

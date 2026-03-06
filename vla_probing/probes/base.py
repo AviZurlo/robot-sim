@@ -39,22 +39,39 @@ class Probe(ABC):
         self,
         prompt: str,
         scene: Scene | None = None,
+        seed: int | None = None,
     ) -> tuple[np.ndarray, dict[str, np.ndarray]]:
         """Run VLA prediction on the current scene.
+
+        Args:
+            seed: If provided, calls adapter.seed_for_inference(seed) after reset()
+                  so that all randomness sources (torch RNG + adapter-internal seeds)
+                  are identical across multiple _predict() calls. Pass the same seed
+                  to baseline and variant predictions to isolate scene changes.
 
         Returns (actions, views) tuple.
         """
         s = scene or self.scene
         views = s.render_all_views()
-        ee_state = s.get_ee_state()
+
+        # Use joint-space state if adapter needs it (e.g., Cosmos Policy)
+        # and the scene supports it; otherwise fall back to EE state.
+        if (hasattr(self.adapter, 'use_joint_state') and
+                self.adapter.use_joint_state and
+                hasattr(s, 'get_joint_state')):
+            proprio = s.get_joint_state()
+        else:
+            proprio = s.get_ee_state()
 
         inp = VLAInput(
             images=[views["image"], views["image2"]],
             prompt=prompt,
-            proprio=ee_state,
+            proprio=proprio,
         )
 
         self.adapter.reset()
+        if seed is not None:
+            self.adapter.seed_for_inference(seed)
         output = self.adapter.predict_action(inp)
         return output.actions, views
 
@@ -67,11 +84,18 @@ class Probe(ABC):
         import torch
 
         views = self.scene.render_all_views()
-        ee_state = self.scene.get_ee_state()
+
+        if (hasattr(self.adapter, 'use_joint_state') and
+                self.adapter.use_joint_state and
+                hasattr(self.scene, 'get_joint_state')):
+            proprio = self.scene.get_joint_state()
+        else:
+            proprio = self.scene.get_ee_state()
+
         inp = VLAInput(
             images=[views["image"], views["image2"]],
             prompt=prompt,
-            proprio=ee_state,
+            proprio=proprio,
         )
 
         results = []
@@ -112,6 +136,7 @@ class Probe(ABC):
 def make_adapter(model: str = "xvla", device: str = "mps") -> VLAAdapter:
     """Factory to create a VLA adapter by model name."""
     from vla_probing.adapters.cosmos_policy import CosmosPolicyAdapter
+    from vla_probing.adapters.groot import GR00TAdapter
 
     adapters = {
         "xvla": XVLAAdapter,
@@ -119,6 +144,7 @@ def make_adapter(model: str = "xvla", device: str = "mps") -> VLAAdapter:
         "openvla": OpenVLAAdapter,
         "openvla_oft": OpenVLAOFTAdapter,
         "cosmos_policy": CosmosPolicyAdapter,
+        "groot": GR00TAdapter,
     }
     if model not in adapters:
         raise ValueError(f"Unknown model: {model}. Available: {list(adapters.keys())}")
@@ -131,7 +157,7 @@ def common_args(description: str) -> argparse.ArgumentParser:
     """Create argument parser with common probe arguments."""
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument(
-        "--model", default="xvla", choices=["xvla", "pi0", "openvla", "openvla_oft", "cosmos_policy"], help="VLA model to probe"
+        "--model", default="xvla", choices=["xvla", "pi0", "openvla", "openvla_oft", "cosmos_policy", "groot"], help="VLA model to probe"
     )
     parser.add_argument(
         "--scene", default="auto", choices=["auto", "widowx", "franka"],

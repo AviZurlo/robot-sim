@@ -1,0 +1,8 @@
+# Minimal deps for running Cosmos Policy probes on RunPod
+# (torch + numpy already present in RunPod PyTorch templates)
+mujoco>=3.0.0
+Pillow>=10.0.0
+plotly>=5.0.0
+dtw-python>=1.5.0
+scipy>=1.10.0
+wandb

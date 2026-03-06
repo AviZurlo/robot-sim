@@ -1,0 +1,104 @@
+{
+  "baseline": {
+    "metrics": {
+      "trajectory_jerk": 1.50690758228302,
+      "direction_alignment": -0.01463852997156262,
+      "distance_to_target": 0.9917574491627897,
+      "trajectory_spread": 0.442902535200119
+    },
+    "elapsed_s": 27.085351943969727,
+    "variant": "pick_up_red_block"
+  },
+  "spatial_symmetry": {
+    "metrics": {
+      "trajectory_jerk": 1.838645100593567,
+      "perturbation_sensitivity": 1.7424838542938232,
+      "dtw_baseline_vs_swapped": 61.62269749347904,
+      "swapped_distance_to_original_blue_pos": 0.6054122379308672
+    },
+    "elapsed_s": 3.949349880218506,
+    "variant": "swap_red_blue"
+  },
+  "camera_sensitivity": {
+    "metrics": {
+      "trajectory_jerk": 1.8383584022521973,
+      "mirror_camera_sensitivity": 1.7426141500473022,
+      "flip_image_sensitivity": 1.739452838897705
+    },
+    "elapsed_s": 5.8589701652526855,
+    "variant": "mirror_primary_camera"
+  },
+  "view_ablation": {
+    "metrics": {
+      "trajectory_jerk": 1.50690758228302,
+      "primary_ablation_sensitivity": 1.7385231256484985,
+      "secondary_ablation_sensitivity": 1.7385215759277344,
+      "full_vision_ablation_sensitivity": 1.6986422538757324
+    },
+    "elapsed_s": 7.832317113876343,
+    "variant": "zero_out_views"
+  },
+  "counterfactual": {
+    "metrics": {
+      "trajectory_jerk": 1.50690758228302,
+      "mean_synonym_sensitivity": 0.20066160708665848,
+      "max_synonym_sensitivity": 0.2721582353115082,
+      "vs_pick_up_the_red_cube": 0.11846023797988892,
+      "vs_grab_the_red_block": 0.2721582353115082,
+      "vs_grasp_the_crimson_block": 0.2226012796163559,
+      "vs_pick_up_the_red_object": 0.18942667543888092
+    },
+    "elapsed_s": 9.784047842025757,
+    "variant": "group_red_block_synonyms"
+  },
+  "null_action": {
+    "metrics": {
+      "trajectory_jerk": 1.465187668800354,
+      "mean_null_displacement": 0.844791390305317,
+      "max_null_displacement": 0.8733310011068401,
+      "baseline_pick_displacement": 0.8367610082386997,
+      "null_vs_baseline_ratio": 1.0095969840701833,
+      "null_dont_move_displacement": 0.832959968695845,
+      "null_stay_still_displacement": 0.854114904559224,
+      "null_do_nothing_displacement": 0.8161784618339794,
+      "null_remain_in_place_displacement": 0.8473726153306964,
+      "null_hold_position_displacement": 0.8733310011068401,
+      "spatial_move_up_displacement": 0.8143256928669477,
+      "spatial_move_down_displacement": 0.8364883541901375,
+      "spatial_move_forward_displacement": 0.8500053179982204,
+      "spatial_move_backward_displacement": 0.852533416081585
+    },
+    "elapsed_s": 19.638416051864624,
+    "variant": "null_prompts"
+  },
+  "attention": {
+    "metrics": {
+      "trajectory_jerk": 0.0,
+      "iou_pick_up_the_red_block": 0.0,
+      "iou_pick_up_the_blue_block": 0.0,
+      "mean_attention_iou": 0.0
+    },
+    "elapsed_s": 5.603959083557129,
+    "variant": "multi_prompt_attention"
+  },
+  "perturbation": {
+    "metrics": {
+      "trajectory_jerk": 1.50690758228302,
+      "mean_perturbation_sensitivity": 0.006391745619475841,
+      "max_perturbation_sensitivity": 0.007469141390174627,
+      "shifted_left_sensitivity": 0.00654893321916461,
+      "shifted_left_endpoint_dist": 1.0021409648700794,
+      "shifted_right_sensitivity": 0.007469141390174627,
+      "shifted_right_endpoint_dist": 0.980276273967558,
+      "shifted_forward_sensitivity": 0.006102323532104492,
+      "shifted_forward_endpoint_dist": 0.9842281463491357,
+      "shifted_back_sensitivity": 0.0063630701042711735,
+      "shifted_back_endpoint_dist": 0.9930269787124422,
+      "raised_sensitivity": 0.005475259851664305,
+      "raised_endpoint_dist": 0.9390904493612549,
+      "sensitivity_displacement_correlation": 0.7758650458546746
+    },
+    "elapsed_s": 11.761704921722412,
+    "variant": "block_position_perturbations"
+  }
+}

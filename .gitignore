@@ -212,3 +212,6 @@ outputs/*
 !outputs/plots/
 !outputs/probes/
 *.mp4
+*.npz
+MUJOCO_LOG.TXT
+outputs/probes/viz/

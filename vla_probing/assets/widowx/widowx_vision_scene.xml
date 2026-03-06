@@ -31,7 +31,8 @@
 
     <!-- Blue block (placement target) -->
     <body name="blue_block" pos="0.25 -0.1 0.02">
-      <geom name="blue_block_geom" type="box" size="0.02 0.02 0.02" rgba="0.1 0.1 0.8 1"/>
+      <geom name="blue_block_geom" type="box" size="0.02 0.02 0.02" rgba="0.1 0.1 0.8 1" mass="0.05"/>
+      <freejoint/>
     </body>
 
     <!-- Cameras matching X-VLA WidowX training setup (BridgeData) -->

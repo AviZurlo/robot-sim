@@ -47,6 +47,10 @@ class CosmosPolicyAdapter(VLAAdapter):
 
     model_name = "cosmos_policy"
 
+    # Cosmos Policy needs joint-space proprio (7 joints + 2 fingers = 9D)
+    # rather than EE-space state used by most other adapters.
+    use_joint_state = True
+
     def __init__(self) -> None:
         self.model = None
         self.config = None
@@ -102,7 +106,7 @@ class CosmosPolicyAdapter(VLAAdapter):
             num_open_loop_steps=16,
             trained_with_image_aug=True,
             use_jpeg_compression=True,
-            flip_images=True,  # LIBERO images render upside-down
+            flip_images=False,  # Only True for native LIBERO (renders upside-down)
             num_denoising_steps_action=5,
             num_denoising_steps_future_state=1,
             num_denoising_steps_value=1,
@@ -127,7 +131,7 @@ class CosmosPolicyAdapter(VLAAdapter):
         Cosmos Policy LIBERO expects:
             - primary_image: third-person view (H, W, 3) uint8
             - wrist_image: wrist camera view (H, W, 3) uint8
-            - proprio: proprioceptive state (8D for LIBERO)
+            - proprio: proprioceptive state (9D for LIBERO)
         """
         import cv2
 
@@ -156,8 +160,15 @@ class CosmosPolicyAdapter(VLAAdapter):
         }
 
         # Add proprioception if available
+        # Cosmos Policy LIBERO expects 9D joint-space proprio:
+        # [joint0..joint6, finger_left, finger_right]
+        # Our Franka scene's get_ee_state() returns EE-space (wrong format).
+        # The adapter's predict_action() overrides this with joint state.
         if inp.proprio is not None:
-            obs["proprio"] = inp.proprio[:8].astype(np.float32)
+            p = inp.proprio.astype(np.float32)
+            if len(p) < 9:
+                p = np.pad(p, (0, 9 - len(p)), constant_values=0.0)
+            obs["proprio"] = p[:9]
 
         return obs
 
@@ -232,3 +243,9 @@ class CosmosPolicyAdapter(VLAAdapter):
     def reset(self) -> None:
         """Reset seed for next prediction."""
         self._seed = (self._seed + 1) % 256
+
+    def seed_for_inference(self, seed: int) -> None:
+        """Also reset the cosmos diffusion seed so comparisons are fair."""
+        import torch
+        torch.manual_seed(seed)
+        self._seed = seed % 256
